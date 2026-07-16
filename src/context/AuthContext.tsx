@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { jwtDecode } from 'jwt-decode';
+import { apiClient } from '@/services/api';
 
 export interface User {
   id: string;
@@ -9,6 +11,12 @@ export interface User {
   email: string;
   employeeId: string;
   role: 'Admin' | 'Pilot' | 'Instructor' | 'Engineer';
+}
+
+interface DecodedToken {
+  sub: string;
+  email?: string;
+  [key: string]: unknown;
 }
 
 interface AuthContextType {
@@ -20,91 +28,94 @@ interface AuthContextType {
   registerPersonnel: (name: string, employeeId: string, email: string, role: string) => Promise<boolean>;
 }
 
+const CLAIM_NAME          = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name';
+const CLAIM_ROLE          = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';
+const CLAIM_EMAIL         = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress';
+const CLAIM_EMPLOYEE_CODE = 'employee_code';
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function buildUserFromToken(token: string): User | null {
+  try {
+    const decoded = jwtDecode<DecodedToken & Record<string, unknown>>(token);
+    const role = decoded[CLAIM_ROLE] as string | undefined;
+    if (!role) return null;
+    return {
+      id:         decoded.sub ?? '',
+      name:       (decoded[CLAIM_NAME]  as string) ?? (decoded['name'] as string) ?? '',
+      email:      (decoded[CLAIM_EMAIL] as string) ?? (decoded['email'] as string) ?? '',
+      employeeId: (decoded[CLAIM_EMPLOYEE_CODE] as string) ?? '',
+      role:       role as User['role'],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser]       = useState<User | null>(null);
+  const [token, setToken]     = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const router = useRouter();
+  const router                = useRouter();
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+    if (storedToken) {
+      const parsed = buildUserFromToken(storedToken);
+      if (parsed) {
+        setToken(storedToken);
+        setUser(parsed);
+      } else {
+        localStorage.removeItem('token');
+      }
     }
     setLoading(false);
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    let mockRole: 'Admin' | 'Pilot' | 'Instructor' | 'Engineer' | null = null;
-    let mockName = '';
-    let mockEmpId = '';
+    try {
+      const response = await apiClient.post<{
+        token: string;
+        userId: string;
+        name: string;
+        email: string;
+        employeeCode: string;
+        role: string;
+      }>('/api/auth/login', { email, password });
 
-    if (email === 'admin@lionair.co.id' && password === 'admin123') {
-      mockRole = 'Admin';
-      mockName = 'J. Davidson';
-      mockEmpId = 'EMP-001';
-    } else if (email === 'pilot@lionair.co.id' && password === 'pilot123') {
-      mockRole = 'Pilot';
-      mockName = 'Capt. R. Holt';
-      mockEmpId = 'EMP-102';
-    } else if (email === 'instructor@lionair.co.id' && password === 'instructor123') {
-      mockRole = 'Instructor';
-      mockName = 'Instr. I. Nakamura';
-      mockEmpId = 'EMP-203';
-    } else if (email === 'engineer@lionair.co.id' && password === 'engineer123') {
-      mockRole = 'Engineer';
-      mockName = 'Eng. M. Kowalski';
-      mockEmpId = 'EMP-304';
-    }
+      const { token: jwt, name, employeeCode, role, userId } = response.data;
 
-    if (mockRole) {
-      const payload = {
-        sub: 'mock-user-id-' + mockRole.toLowerCase(),
-        email: email,
-        name: mockName,
-        employee_code: mockEmpId,
-        roles: [mockRole],
-        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8
-      };
-      
-      const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-      const body = btoa(JSON.stringify(payload));
-      const mockJwt = `${header}.${body}.mocksignature`;
-
-      localStorage.setItem('token', mockJwt);
       const loggedUser: User = {
-        id: payload.sub,
-        name: mockName,
-        email: email,
-        employeeId: mockEmpId,
-        role: mockRole
+        id:         userId,
+        name,
+        email,
+        employeeId: employeeCode,
+        role:       role as User['role'],
       };
-      localStorage.setItem('user', JSON.stringify(loggedUser));
-      setToken(mockJwt);
+
+      localStorage.setItem('token', jwt);
+      setToken(jwt);
       setUser(loggedUser);
       return true;
+    } catch {
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
     localStorage.removeItem('token');
-    localStorage.removeItem('user');
     setToken(null);
     setUser(null);
     router.push('/');
   };
 
-  const registerPersonnel = async (name: string, employeeId: string, email: string, role: string): Promise<boolean> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(true);
-      }, 500);
-    });
+  const registerPersonnel = async (
+    _name: string,
+    _employeeId: string,
+    _email: string,
+    _role: string
+  ): Promise<boolean> => {
+    return new Promise((resolve) => setTimeout(() => resolve(true), 500));
   };
 
   return (

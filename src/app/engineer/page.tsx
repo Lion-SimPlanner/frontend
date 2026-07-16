@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { getSimulators, setSimulatorStatus, submitMaintenanceChecklist, Simulator } from '@/services/api';
+import { getHubConnection, startConnection } from '@/services/signalr';
 
 export default function EngineerDashboard() {
   const { user, logout, loading: authLoading } = useAuth();
@@ -26,6 +27,21 @@ export default function EngineerDashboard() {
       router.push('/');
     } else if (user) {
       loadData();
+      startConnection();
+      const hub = getHubConnection();
+      const handleAogReported = (payload: { simulatorId: string; status: string }) => {
+        setSimulators((prev) =>
+          prev.map((s) =>
+            s.id === payload.simulatorId
+              ? { ...s, status: payload.status === 'Down' ? 'Down' : 'Up' }
+              : s
+          )
+        );
+      };
+      hub.on('AogReported', handleAogReported);
+      return () => {
+        hub.off('AogReported', handleAogReported);
+      };
     }
   }, [user, authLoading]);
 

@@ -20,6 +20,7 @@ import {
   Simulator,
   SimulatorSession
 } from '@/services/api';
+import { getHubConnection, startConnection } from '@/services/signalr';
 
 const parseIsoDateTime = (isoStr: string) => {
   const parts = isoStr.split('T');
@@ -66,7 +67,7 @@ export default function AdminPage() {
   const [sessionEndMin, setSessionEndMin] = useState<string>('00');
   const [sessionDuration, setSessionDuration] = useState<number>(4);
 
-  const [selectedSimId, setSelectedSimId] = useState('sim-01');
+  const [selectedSimId, setSelectedSimId] = useState('');
   const [selectedSessionType, setSelectedSessionType] = useState('Type Rating');
 
   const [assignedCaptain, setAssignedCaptain] = useState<PilotPriority | null>(null);
@@ -184,6 +185,7 @@ export default function AdminPage() {
       setEngineers(engData);
       setSimulators(simsData);
       setSessions(sessData);
+      setSelectedSimId(prev => (prev === '' && simsData.length > 0) ? simsData[0].id : prev);
     } catch (err) {
       console.error(err);
     }
@@ -192,6 +194,44 @@ export default function AdminPage() {
   useEffect(() => {
     loadData();
     setMounted(true);
+    startConnection();
+    const hub = getHubConnection();
+
+    const handleAogReported = (payload: { simulatorId: string; status: string }) => {
+      setSimulators((prev) =>
+        prev.map((s) =>
+          s.id === payload.simulatorId
+            ? { ...s, status: payload.status === 'Down' ? 'Down' : 'Up' }
+            : s
+        )
+      );
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.simulatorId === payload.simulatorId &&
+          (s.status === 'Scheduled' || s.status === 'InProgress')
+            ? { ...s, status: 'Cancelled' as const }
+            : s
+        )
+      );
+    };
+
+    const handleSessionGraded = (payload: { sessionId: string; gradeStatus: string }) => {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.sessionId === payload.sessionId
+            ? { ...s, status: 'Completed' as const, gradeStatus: payload.gradeStatus, isGraded: true }
+            : s
+        )
+      );
+    };
+
+    hub.on('AogReported', handleAogReported);
+    hub.on('SessionGraded', handleSessionGraded);
+
+    return () => {
+      hub.off('AogReported', handleAogReported);
+      hub.off('SessionGraded', handleSessionGraded);
+    };
   }, []);
 
   useEffect(() => {
@@ -293,44 +333,72 @@ export default function AdminPage() {
   };
 
   const handlePublish = async () => {
-    if (!selectedSlot || validationViolations.length > 0) {
+    if (!selectedSlot) return;
+
+    const preflightErrors: string[] = [];
+
+    if (!selectedSimId) {
+      preflightErrors.push('No Simulator selected. Select a valid simulator from the dropdown before publishing.');
+    }
+    if (!assignedCaptain) {
+      preflightErrors.push('No Captain assigned. Dual-crew simulator sessions require a PIC/Captain.');
+    }
+    if (!assignedInstructor) {
+      preflightErrors.push('No Instructor assigned. A qualified Instructor is required for regulatory grading.');
+    }
+    if (preflightErrors.length > 0) {
+      setValidationViolations(preflightErrors);
       return;
     }
 
-    const startISO = `2026-07-${sessionDay.toString().padStart(2, '0')}T${sessionStartHour}:${sessionStartMin}:00`;
-    const endISO = `2026-07-${sessionDay.toString().padStart(2, '0')}T${sessionEndHour}:${sessionEndMin}:00`;
+    const startTime = new Date(
+      Date.UTC(2026, 6, sessionDay, parseInt(sessionStartHour, 10), parseInt(sessionStartMin, 10), 0)
+    ).toISOString();
+    const endTime = new Date(
+      Date.UTC(2026, 6, sessionDay, parseInt(sessionEndHour, 10), parseInt(sessionEndMin, 10), 0)
+    ).toISOString();
+
+    const syllabusId = assignedCaptain!.requiredSyllabus
+      || `${selectedSessionType.replace(/\s+/g, '_').toUpperCase()}_CUSTOM`;
+
+    const payload = {
+      simulatorId: selectedSimId,
+      sessionType: selectedSessionType,
+      startTime,
+      endTime,
+      captainId: assignedCaptain?.pilotId || null,
+      firstOfficerId: assignedFO?.pilotId || null,
+      instructorId: assignedInstructor?.id || null,
+      engineerId: null,
+      syllabusId,
+      traineeEmployeeCode: assignedCaptain!.employeeCode,
+    };
 
     try {
-      const sessResult = await createSession({
-        simulatorId: selectedSimId,
-        sessionType: selectedSessionType,
-        startTime: startISO,
-        endTime: endISO,
-        captainId: assignedCaptain?.pilotId,
-        firstOfficerId: assignedFO?.pilotId,
-        instructorId: assignedInstructor?.id,
-        syllabusId: 'SYLL-CUSTOM',
-        traineeEmployeeCode: assignedCaptain?.employeeCode || 'T001',
-      });
-
+      const sessResult = await createSession(payload);
       const publishResult = await publishSession(sessResult.sessionId);
       setPublishSuccess(publishResult.message);
-      
+
       setAssignedCaptain(null);
       setAssignedFO(null);
       setAssignedInstructor(null);
       setSelectedSlot(null);
-      
+
       await loadData();
-      
+
       setTimeout(() => {
         setPublishSuccess(null);
       }, 2500);
     } catch (err: any) {
-      if (err.response && err.response.data && err.response.data.violations) {
+      if (err.response?.data?.violations) {
         setValidationViolations(err.response.data.violations);
+      } else if (err.response?.data?.errors) {
+        const bindingErrors = Object.entries(
+          err.response.data.errors as Record<string, string[]>
+        ).flatMap(([field, msgs]) => msgs.map((m: string) => `${field}: ${m}`));
+        setValidationViolations(bindingErrors);
       } else {
-        setValidationViolations(['Failed to publish session.']);
+        setValidationViolations(['Failed to publish session. Verify connection and retry.']);
       }
     }
   };

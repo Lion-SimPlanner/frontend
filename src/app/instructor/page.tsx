@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { getSessions, publishSession, SimulatorSession } from '@/services/api';
+import { getHubConnection, startConnection } from '@/services/signalr';
 
 interface ExtendedSession extends SimulatorSession {
   title: string;
@@ -32,70 +33,55 @@ export default function InstructorDashboard() {
       router.push('/');
     } else if (user) {
       loadData();
+      startConnection();
+      const hub = getHubConnection();
+      const handleSessionGraded = (payload: { sessionId: string; gradeStatus: string }) => {
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.sessionId === payload.sessionId
+              ? { ...s, status: 'Completed' as const, gradeStatus: payload.gradeStatus, isGraded: true }
+              : s
+          )
+        );
+      };
+      hub.on('SessionGraded', handleSessionGraded);
+      return () => {
+        hub.off('SessionGraded', handleSessionGraded);
+      };
     }
   }, [user, authLoading]);
 
   const loadData = async () => {
     try {
       const rawSessions = await getSessions();
-      const mapped: ExtendedSession[] = rawSessions.map(s => {
-        let title = 'Simulator Session';
-        let phase = 'Phase 3';
-        let pilotName = 'Cpt. Arjun Mehta';
-        let simulatorName = 'Jakarta B737-800NG';
-
-        if (s.sessionId === 'session-01') {
-          title = 'ILS Approach — CAT II';
-          phase = 'Phase 3';
-          pilotName = 'Cpt. Arjun Mehta';
-          simulatorName = 'Jakarta B737-800NG';
-        } else if (s.sessionId === 'session-02') {
-          title = 'VNAV Profile Review';
-          phase = 'Phase 4';
-          pilotName = 'Capt. M. Ellis';
-          simulatorName = 'Jakarta A330-900neo';
-        } else if (s.sessionId === 'session-03') {
-          title = 'Emergency Procedures';
-          phase = 'Phase 2';
-          pilotName = 'F/O S. Chen';
-          simulatorName = 'Jakarta B737 MAX 8';
-        } else if (s.sessionId === 'session-04') {
-          title = 'Engine Failure Drills';
-          phase = 'Phase 3';
-          pilotName = 'Capt. L. Beaumont';
-          simulatorName = 'Jakarta B737-800NG';
-        } else if (s.sessionId === 'session-05') {
-          title = 'Crosswind Landings';
-          phase = 'Phase 1';
-          pilotName = 'Capt. S. Okonkwo';
-          simulatorName = 'Jakarta B737 MAX 8';
-        } else if (s.sessionId === 'session-06') {
-          title = 'Autoland Operations';
-          phase = 'Phase 4';
-          pilotName = 'Capt. M. Ellis';
-          simulatorName = 'Jakarta A330-900neo';
-        } else if (s.sessionId === 'session-07') {
-          title = 'Visual Approaches';
-          phase = 'Phase 2';
-          pilotName = 'F/O S. Chen';
-          simulatorName = 'Jakarta A320-200';
-        }
-
+      const mapped: ExtendedSession[] = rawSessions.map((s) => {
+        const syllabusLabel = s.syllabusId
+          .replace(/([A-Z])/g, ' $1')
+          .trim();
+        const startHour = new Date(s.startTime).getHours();
+        const phase =
+          startHour < 9 ? 'Phase 1' :
+          startHour < 12 ? 'Phase 2' :
+          startHour < 15 ? 'Phase 3' : 'Phase 4';
         return {
           ...s,
-          title,
+          title: syllabusLabel,
           phase,
-          pilotName,
-          simulatorName,
+          pilotName: s.traineeEmployeeCode,
+          simulatorName: s.simulatorId,
         };
       });
-
+      const active = mapped.filter(
+        (s) => s.status === 'Scheduled' || s.status === 'InProgress'
+      );
       setSessions(mapped);
-      if (mapped.length > 0) {
+      if (active.length > 0) {
+        setSelectedSession(active[0]);
+      } else if (mapped.length > 0) {
         setSelectedSession(mapped[0]);
       }
     } catch (err) {
-      console.error(err);
+      console.error('[Instructor] Failed to load sessions:', err);
     } finally {
       setLoading(false);
     }
