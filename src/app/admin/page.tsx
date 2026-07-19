@@ -22,25 +22,46 @@ import {
 } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 
-const parseIsoDateTime = (isoStr: string) => {
-  const parts = isoStr.split('T');
-  const dateParts = parts[0].split('-');
-  const timeParts = parts[1].split(':');
-  return {
-    year: parseInt(dateParts[0]),
-    month: parseInt(dateParts[1]),
-    day: parseInt(dateParts[2]),
-    hour: parseInt(timeParts[0]),
-    minute: parseInt(timeParts[1])
-  };
+const toLocalDate = (value?: string) => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
 };
 
 const getDurationInHours = (startTime: string, endTime: string) => {
-  const start = parseIsoDateTime(startTime);
-  const end = parseIsoDateTime(endTime);
-  const startDecimal = start.hour + start.minute / 60;
-  const endDecimal = end.hour + end.minute / 60;
-  return Math.max(0.5, endDecimal - startDecimal);
+  const start = toLocalDate(startTime);
+  const end = toLocalDate(endTime);
+  if (!start || !end) return 0.5;
+  return Math.max(0.5, (end.getTime() - start.getTime()) / (1000 * 60 * 60));
+};
+
+const formatLocalTimestamp = (value?: string) => {
+  if (!value) return 'N/A';
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return 'N/A';
+  return dt.toLocaleString('en-GB', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+};
+
+const getFtlState = (lastDutyEndTime: string | undefined, referenceUtcIso: string, minRestHours: number = 10) => {
+  const lastDuty = toLocalDate(lastDutyEndTime);
+  const reference = toLocalDate(referenceUtcIso);
+  if (!lastDuty || !reference) {
+    return { isClear: true, availableFrom: null as string | null };
+  }
+
+  const availableAt = new Date(lastDuty.getTime() + minRestHours * 60 * 60 * 1000);
+  return {
+    isClear: availableAt.getTime() <= reference.getTime(),
+    availableFrom: availableAt.toISOString(),
+  };
 };
 
 export default function AdminPage() {
@@ -68,7 +89,7 @@ export default function AdminPage() {
   const [sessionDuration, setSessionDuration] = useState<number>(4);
 
   const [selectedSimId, setSelectedSimId] = useState('');
-  const [selectedSessionType, setSelectedSessionType] = useState('Type Rating');
+  const [selectedSessionType, setSelectedSessionType] = useState('InitialTypeRating');
 
   const [assignedCaptain, setAssignedCaptain] = useState<PilotPriority | null>(null);
   const [assignedFO, setAssignedFO] = useState<PilotPriority | null>(null);
@@ -167,8 +188,20 @@ export default function AdminPage() {
   ];
 
   useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/');
+    if (!authLoading) {
+      if (!user) {
+        router.push('/');
+      } else if (user.role !== 'Admin') {
+        if (user.role === 'Engineer') {
+          router.push('/engineer');
+        } else if (user.role === 'Instructor') {
+          router.push('/instructor');
+        } else if (user.role === 'Pilot') {
+          router.push('/pilot');
+        } else {
+          router.push('/');
+        }
+      }
     }
   }, [user, authLoading, router]);
 
@@ -240,7 +273,7 @@ export default function AdminPage() {
     if (!assignedCaptain) {
       violations.push('No Captain assigned. Dual-crew simulator sessions require an PIC/Captain.');
     }
-    if (!assignedFO && selectedSessionType !== 'Single-Pilot') {
+    if (!assignedFO && selectedSessionType !== 'SinglePilotCRM') {
       violations.push('No First Officer assigned. Dual-crew sessions require an FO.');
     }
     if (!assignedInstructor) {
@@ -256,9 +289,11 @@ export default function AdminPage() {
   const handleCellClick = (day: number, hour: number) => {
     const isOccupied = sessions.some(s => {
       if (s.status === 'Cancelled') return false;
-      const start = parseIsoDateTime(s.startTime);
-      const end = parseIsoDateTime(s.endTime);
-      return start.day === day && hour >= start.hour && hour < end.hour;
+      const start = toLocalDate(s.startTime);
+      const end = toLocalDate(s.endTime);
+      if (!start || !end) return false;
+      const endHour = end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours();
+      return start.getDate() === day && hour >= start.getHours() && hour < endHour;
     });
 
     if (isOccupied) return;
@@ -334,6 +369,7 @@ export default function AdminPage() {
 
   const handlePublish = async () => {
     if (!selectedSlot) return;
+    if (validationViolations.length > 0) return;
 
     const preflightErrors: string[] = [];
 
@@ -352,10 +388,20 @@ export default function AdminPage() {
     }
 
     const startTime = new Date(
-      Date.UTC(2026, 6, sessionDay, parseInt(sessionStartHour, 10), parseInt(sessionStartMin, 10), 0)
+      2026,
+      6,
+      sessionDay,
+      parseInt(sessionStartHour, 10),
+      parseInt(sessionStartMin, 10),
+      0
     ).toISOString();
     const endTime = new Date(
-      Date.UTC(2026, 6, sessionDay, parseInt(sessionEndHour, 10), parseInt(sessionEndMin, 10), 0)
+      2026,
+      6,
+      sessionDay,
+      parseInt(sessionEndHour, 10),
+      parseInt(sessionEndMin, 10),
+      0
     ).toISOString();
 
     const syllabusId = assignedCaptain!.requiredSyllabus
@@ -366,10 +412,10 @@ export default function AdminPage() {
       sessionType: selectedSessionType,
       startTime,
       endTime,
-      captainId: assignedCaptain?.pilotId || null,
-      firstOfficerId: assignedFO?.pilotId || null,
-      instructorId: assignedInstructor?.id || null,
-      engineerId: null,
+      captainId: assignedCaptain?.pilotId ?? undefined,
+      firstOfficerId: assignedFO?.pilotId ?? undefined,
+      instructorId: assignedInstructor?.id ?? undefined,
+      engineerId: undefined,
       syllabusId,
       traineeEmployeeCode: assignedCaptain!.employeeCode,
     };
@@ -484,6 +530,43 @@ export default function AdminPage() {
       case 20: return 'Sunday';
       default: return '';
     }
+  };
+
+  const referenceSessionStartIso = selectedSlot
+    ? new Date(
+        2026,
+        6,
+        sessionDay,
+        parseInt(sessionStartHour, 10),
+        parseInt(sessionStartMin, 10),
+        0
+      ).toISOString()
+    : new Date().toISOString();
+
+  const nowLocal = new Date();
+
+  const getEngineerShiftLabel = (shiftStart?: string, shiftEnd?: string) => {
+    const start = toLocalDate(shiftStart);
+    const end = toLocalDate(shiftEnd);
+    if (!start || !end) return 'Shift data unavailable';
+    return `${start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })} - ${end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })} LOCAL`;
+  };
+
+  const isEngineerOnShiftNow = (shiftStart?: string, shiftEnd?: string) => {
+    const start = toLocalDate(shiftStart);
+    const end = toLocalDate(shiftEnd);
+    if (!start || !end) return false;
+    return nowLocal.getTime() >= start.getTime() && nowLocal.getTime() <= end.getTime();
+  };
+
+  const hasEngineerCoverage = (day: number, hour: number) => {
+    return engineers.some((engineer) => {
+      const shiftStart = toLocalDate(engineer.shiftStart);
+      const shiftEnd = toLocalDate(engineer.shiftEnd);
+      if (!shiftStart || !shiftEnd) return false;
+      if (shiftStart.getDate() !== day) return false;
+      return hour >= shiftStart.getHours() && hour < shiftEnd.getHours();
+    });
   };
 
   return (
@@ -744,6 +827,7 @@ export default function AdminPage() {
             <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
               {filteredPilots.map(p => {
                 const expiryDays = Math.max(0, Math.ceil((new Date(p.nextTrainingDue).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+                const ftl = getFtlState(p.lastDutyEndTime, referenceSessionStartIso);
                 let expiryColorClass = '';
                 if (expiryDays <= 10) {
                   expiryColorClass = 'text-brand-red bg-red-50 border border-brand-red';
@@ -765,6 +849,20 @@ export default function AdminPage() {
                           <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none ${expiryColorClass}`}>
                             EXP IN {expiryDays}D
                           </span>
+                        </div>
+                        <div className="mt-1.5 p-1.5 border rounded bg-gray-50">
+                          {ftl.isClear ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider">
+                              Rest Clear
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
+                              Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
+                            </span>
+                          )}
+                          <div className="text-[8px] text-gray-500 uppercase mt-1 truncate">
+                            Last Duty: {formatLocalTimestamp(p.lastDutyEndTime)} Local
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -806,12 +904,40 @@ export default function AdminPage() {
                     <div className="min-w-0">
                       <div className="text-xs font-black text-gray-900 truncate">{i.name}</div>
                       <div className="text-[9px] text-gray-400 uppercase truncate">{i.status}</div>
+                      <div className="mt-1.5 p-1.5 border rounded bg-gray-50">
+                        {(() => {
+                          const ftl = getFtlState(i.lastDutyEndTime, referenceSessionStartIso);
+                          return ftl.isClear ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider">
+                              Rest Clear
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
+                              Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
+                            </span>
+                          );
+                        })()}
+                        <div className="text-[8px] text-gray-500 uppercase mt-1 truncate">
+                          Last Duty: {formatLocalTimestamp(i.lastDutyEndTime)} Local
+                        </div>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {i.certifiedTypes.slice(0, 3).map((type) => (
+                          <span key={`${i.id}-type-${type}`} className="text-[8px] border border-brand-red text-brand-red px-1 rounded font-black uppercase leading-none">
+                            {type}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {i.authorizedSyllabi.slice(0, 3).map((syllabus) => (
+                          <span key={`${i.id}-syll-${syllabus}`} className="text-[8px] border border-gray-300 text-gray-600 px-1 rounded font-black uppercase leading-none">
+                            {syllabus}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[8px] border border-brand-red text-brand-red px-1 rounded font-black uppercase leading-none">
-                      {i.rating}
-                    </span>
                     {selectedSlot && (
                       <button
                         onClick={() => handleAssignInstructor(i)}
@@ -844,7 +970,8 @@ export default function AdminPage() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-black text-gray-900 truncate">{e.name}</div>
-                      <div className="text-[9px] text-gray-400 uppercase truncate">{e.status}</div>
+                      <div className="text-[9px] text-gray-400 uppercase truncate">{isEngineerOnShiftNow(e.shiftStart, e.shiftEnd) ? 'On-Shift' : 'Off-Shift'}</div>
+                      <div className="text-[8px] text-gray-500 uppercase truncate">{getEngineerShiftLabel(e.shiftStart, e.shiftEnd)}</div>
                     </div>
                   </div>
                   <span className="text-[8px] border border-gray-300 text-gray-600 px-1 rounded font-black uppercase shrink-0 leading-none">
@@ -912,13 +1039,13 @@ export default function AdminPage() {
                         {[14, 15, 16, 17, 18, 19, 20].map(day => {
                           const daySessions = sessions.filter(s => {
                             if (s.status === 'Cancelled') return false;
-                            const start = parseIsoDateTime(s.startTime);
-                            return start.day === day;
+                            const start = toLocalDate(s.startTime);
+                            return !!start && start.getDate() === day;
                           });
 
                           const startingSessions = daySessions.filter(s => {
-                            const start = parseIsoDateTime(s.startTime);
-                            return start.hour === hour;
+                            const start = toLocalDate(s.startTime);
+                            return !!start && start.getHours() === hour;
                           });
 
                           const isSelectedDraft = selectedSlot &&
@@ -927,6 +1054,7 @@ export default function AdminPage() {
                             hour < Math.min(24, selectedSlot.hour + Math.ceil(sessionDuration));
 
                           const startHourSelected = selectedSlot && selectedSlot.day === day && selectedSlot.hour === hour;
+                          const engineerCovered = hasEngineerCoverage(day, hour);
 
                           return (
                             <div
@@ -935,9 +1063,16 @@ export default function AdminPage() {
                               className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors ${
                                 isSelectedDraft
                                   ? 'bg-red-50'
+                                  : engineerCovered
+                                  ? 'hover:bg-red-50/20 cursor-pointer bg-blue-50/40'
                                   : 'hover:bg-red-50/20 cursor-pointer bg-white'
                               }`}
                             >
+                              {engineerCovered && (
+                                <span className="absolute top-1 right-1 text-[7px] font-black uppercase text-blue-700 bg-blue-100 border border-blue-200 px-1 rounded leading-none">
+                                  Eng
+                                </span>
+                              )}
                               {isSelectedDraft && startHourSelected && (
                                   <div
                                     style={{
@@ -959,11 +1094,12 @@ export default function AdminPage() {
                               )}
 
                               {startingSessions.map(s => {
-                                const start = parseIsoDateTime(s.startTime);
+                                const start = toLocalDate(s.startTime);
+                                if (!start) return null;
                                 const duration = getDurationInHours(s.startTime, s.endTime);
                                 const heightPx = (duration * 56) - 4;
-                                const topOffsetPx = Math.round((start.minute / 60) * 56) + 2;
-                                const isSpecial = s.sessionType === 'Type Rating' || s.sessionType === 'OPC';
+                                const topOffsetPx = Math.round((start.getMinutes() / 60) * 56) + 2;
+                                const isSpecial = s.sessionType === 'InitialTypeRating' || s.sessionType === 'OPC';
 
                                 return (
                                   <div
@@ -1036,15 +1172,26 @@ export default function AdminPage() {
 
                 <div>
                   <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Schedule</span>
-                  <span className="text-gray-950">
-                    {getDayName(parseIsoDateTime(viewedSession.startTime).day)}, July {parseIsoDateTime(viewedSession.startTime).day}
-                  </span>
-                  <div className="text-[9px] text-gray-500 mt-0.5">
-                    {parseIsoDateTime(viewedSession.startTime).hour.toString().padStart(2, '0')}:
-                    {parseIsoDateTime(viewedSession.startTime).minute.toString().padStart(2, '0')} - {' '}
-                    {parseIsoDateTime(viewedSession.endTime).hour.toString().padStart(2, '0')}:
-                    {parseIsoDateTime(viewedSession.endTime).minute.toString().padStart(2, '0')}
-                  </div>
+                  {(() => {
+                    const viewedStart = toLocalDate(viewedSession.startTime);
+                    const viewedEnd = toLocalDate(viewedSession.endTime);
+                    if (!viewedStart || !viewedEnd) {
+                      return <span className="text-gray-950">N/A</span>;
+                    }
+                    return (
+                      <>
+                        <span className="text-gray-950">
+                          {getDayName(viewedStart.getDate())}, July {viewedStart.getDate()}
+                        </span>
+                        <div className="text-[9px] text-gray-500 mt-0.5">
+                          {viewedStart.getHours().toString().padStart(2, '0')}:
+                          {viewedStart.getMinutes().toString().padStart(2, '0')} - {' '}
+                          {viewedEnd.getHours().toString().padStart(2, '0')}:
+                          {viewedEnd.getMinutes().toString().padStart(2, '0')} Local
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -1192,10 +1339,16 @@ export default function AdminPage() {
                       onChange={(e) => setSelectedSessionType(e.target.value)}
                       className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
                     >
-                      <option value="Type Rating">Type Rating</option>
-                      <option value="OPC">OPC</option>
-                      <option value="Recurrent">Recurrent</option>
-                      <option value="Single-Pilot">Single-Pilot</option>
+                      <option value="Recurrent">Recurrent Training</option>
+                      <option value="OPC">Operator Proficiency Check (OPC)</option>
+                      <option value="LPC">License Proficiency Check (LPC)</option>
+                      <option value="InitialTypeRating">Initial Type Rating</option>
+                      <option value="CommandUpgrade">Command Upgrade Training</option>
+                      <option value="Differences">Differences / Familiarization</option>
+                      <option value="Requalification">Requalification Training</option>
+                      <option value="LOFT">Line-Oriented Flight Training (LOFT)</option>
+                      <option value="SinglePilotCRM">Single-Pilot CRM</option>
+                      <option value="MCC">Multi-Crew Cooperation (MCC)</option>
                     </select>
                   </div>
                 </div>

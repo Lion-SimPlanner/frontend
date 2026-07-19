@@ -19,24 +19,19 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const success = await login(email, password);
-      if (success) {
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          const userObj = JSON.parse(storedUser);
-          if (userObj.role === 'Admin') {
-            router.push('/admin');
-          } else if (userObj.role === 'Engineer') {
-            router.push('/engineer');
-          } else if (userObj.role === 'Instructor') {
-            router.push('/instructor');
-          } else if (userObj.role === 'Pilot') {
-            router.push('/pilot');
-          } else {
-            router.push('/admin');
-          }
-        } else {
+      const loggedUser = await login(email, password);
+      if (loggedUser) {
+        const role = loggedUser.role.toLowerCase();
+        if (role === 'admin') {
           router.push('/admin');
+        } else if (role === 'engineer') {
+          router.push('/engineer');
+        } else if (role === 'instructor') {
+          router.push('/instructor');
+        } else if (role === 'pilot') {
+          router.push('/pilot');
+        } else {
+          router.push('/');
         }
       } else {
         setError('Invalid corporate email or password. Use default credentials.');

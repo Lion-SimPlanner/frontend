@@ -29,9 +29,24 @@ export default function InstructorDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (!authLoading && (!user || user.role !== 'Instructor')) {
-      router.push('/');
-    } else if (user) {
+    if (!authLoading) {
+      if (!user) {
+        router.push('/');
+        return;
+      }
+      const role = user.role.toLowerCase();
+      if (role !== 'instructor') {
+        if (role === 'admin') {
+          router.push('/admin');
+        } else if (role === 'engineer') {
+          router.push('/engineer');
+        } else if (role === 'pilot') {
+          router.push('/pilot');
+        } else {
+          router.push('/');
+        }
+        return;
+      }
       loadData();
       startConnection();
       const hub = getHubConnection();
@@ -49,7 +64,7 @@ export default function InstructorDashboard() {
         hub.off('SessionGraded', handleSessionGraded);
       };
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, router]);
 
   const loadData = async () => {
     try {

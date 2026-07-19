@@ -17,6 +17,38 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function ensureUuid(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (v === '') return null;
+  return uuidRegex.test(v) ? v : null;
+}
+
+function sanitizePayload(payload: Record<string, any>, uuidFields: string[], requiredFields: string[] = []): Record<string, any> {
+  const out: Record<string, any> = { ...payload };
+  for (const f of uuidFields) {
+    if (Object.prototype.hasOwnProperty.call(out, f)) {
+      const val = out[f];
+      const ensured = ensureUuid(val);
+      out[f] = ensured === null ? null : ensured;
+    }
+  }
+  for (const r of requiredFields) {
+    if (!out[r] || out[r] === null) throw new Error(`Missing required field: ${r}`);
+  }
+  return out;
+}
+
+function normalizeUtcIso(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return undefined;
+  return dt.toISOString();
+}
+
 export interface PilotPriority {
   pilotId: string;
   employeeCode: string;
@@ -33,9 +65,16 @@ export interface PilotPriority {
 export interface Instructor {
   id: string;
   name: string;
-  rating: string;
+  ratings: string[];
+  certifiedTypes: string[];
+  authorizedSyllabi: string[];
   status: string;
   employeeCode: string;
+  licenseExpiry?: string;
+  lastDutyEndTime?: string;
+  nextDutyStartTime?: string;
+  currentMonthlyHours?: number;
+  maxMonthlyHours?: number;
 }
 
 export interface Engineer {
@@ -44,6 +83,9 @@ export interface Engineer {
   status: string;
   assignedSim: string;
   employeeCode: string;
+  shiftStart?: string;
+  shiftEnd?: string;
+  isOnCall?: boolean;
 }
 
 export interface Simulator {
@@ -51,6 +93,7 @@ export interface Simulator {
   name: string;
   typeRating: string;
   status: 'Up' | 'Down';
+  lastChangedAt?: string;
 }
 
 export interface SimulatorSession {
@@ -93,9 +136,16 @@ export const getInstructors = async (): Promise<Instructor[]> => {
   return response.data.map((i) => ({
     id: i.id,
     name: i.fullName,
-    rating: (i.certifiedTypes as string[])?.[0] ?? '',
+    ratings: Array.isArray(i.certifiedTypes) ? i.certifiedTypes : [],
+    certifiedTypes: Array.isArray(i.certifiedTypes) ? i.certifiedTypes : [],
+    authorizedSyllabi: Array.isArray(i.authorizedSyllabi) ? i.authorizedSyllabi : [],
     status: 'On-Duty',
     employeeCode: i.employeeCode,
+    licenseExpiry: normalizeUtcIso(i.licenseExpiry),
+    lastDutyEndTime: normalizeUtcIso(i.lastDutyEndTime),
+    nextDutyStartTime: normalizeUtcIso(i.nextDutyStartTime),
+    currentMonthlyHours: typeof i.currentMonthlyHours === 'number' ? i.currentMonthlyHours : undefined,
+    maxMonthlyHours: typeof i.maxMonthlyHours === 'number' ? i.maxMonthlyHours : undefined,
   }));
 };
 
@@ -107,6 +157,9 @@ export const getEngineers = async (): Promise<Engineer[]> => {
     status: 'On-Shift',
     assignedSim: (e.hardwareRatings as string[])?.[0] ?? '',
     employeeCode: e.employeeCode,
+    shiftStart: normalizeUtcIso(e.shiftStart),
+    shiftEnd: normalizeUtcIso(e.shiftEnd),
+    isOnCall: typeof e.isOnCall === 'boolean' ? e.isOnCall : undefined,
   }));
 };
 
@@ -117,12 +170,17 @@ export const getSimulators = async (): Promise<Simulator[]> => {
     name: s.name,
     typeRating: s.aircraftType,
     status: s.status === 'Down' ? 'Down' : 'Up',
+    lastChangedAt: normalizeUtcIso(s.lastChangedAt),
   }));
 };
 
 export const getSessions = async (): Promise<SimulatorSession[]> => {
   const response = await apiClient.get<SimulatorSession[]>('/api/scheduling/sessions');
-  return response.data;
+  return response.data.map((s) => ({
+    ...s,
+    startTime: normalizeUtcIso(s.startTime) ?? s.startTime,
+    endTime: normalizeUtcIso(s.endTime) ?? s.endTime,
+  }));
 };
 
 export const createSession = async (req: {
@@ -137,14 +195,22 @@ export const createSession = async (req: {
   syllabusId: string;
   traineeEmployeeCode: string;
 }): Promise<{ sessionId: string; status: string }> => {
-  const response = await apiClient.post('/api/scheduling/sessions', req);
+  const sanitized = sanitizePayload(req as Record<string, any>, ['simulatorId', 'captainId', 'firstOfficerId', 'instructorId', 'engineerId'], ['simulatorId', 'startTime', 'endTime', 'syllabusId', 'traineeEmployeeCode']);
+  const normalizedStartTime = normalizeUtcIso(sanitized.startTime);
+  const normalizedEndTime = normalizeUtcIso(sanitized.endTime);
+  if (!normalizedStartTime || !normalizedEndTime) throw new Error('Invalid session datetime payload');
+  sanitized.startTime = normalizedStartTime;
+  sanitized.endTime = normalizedEndTime;
+  const response = await apiClient.post('/api/scheduling/sessions', sanitized);
   return response.data;
 };
 
 export const publishSession = async (
   id: string
 ): Promise<{ sessionId: string; status: string; message: string }> => {
-  const response = await apiClient.put(`/api/scheduling/sessions/${id}/publish`);
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid session id');
+  const response = await apiClient.put(`/api/scheduling/sessions/${valid}/publish`);
   return response.data;
 };
 
@@ -152,7 +218,9 @@ export const cancelSession = async (
   id: string,
   reason: string
 ): Promise<{ sessionId: string; status: string }> => {
-  const response = await apiClient.put(`/api/scheduling/sessions/${id}/cancel`, { reason });
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid session id');
+  const response = await apiClient.put(`/api/scheduling/sessions/${valid}/cancel`, { reason });
   return response.data;
 };
 
@@ -163,7 +231,8 @@ export const submitMaintenanceChecklist = async (req: {
   notes: string;
   blockingReason?: string;
 }): Promise<{ checklistId: string; simulatorId: string; isCleared: boolean; shieldStatus: string }> => {
-  const response = await apiClient.post('/api/asset/maintenance/checklist', req);
+  const sanitized = sanitizePayload(req as Record<string, any>, ['simulatorId'], ['simulatorId', 'checklistDate']);
+  const response = await apiClient.post('/api/asset/maintenance/checklist', sanitized);
   return response.data;
 };
 
@@ -172,7 +241,9 @@ export const setSimulatorStatus = async (
   status: string,
   faultDescription?: string
 ): Promise<{ simulatorId: string; newStatus: string; aogTriggered: boolean }> => {
-  const response = await apiClient.post(`/api/asset/simulators/${id}/status`, {
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid simulator id');
+  const response = await apiClient.post(`/api/asset/simulators/${valid}/status`, {
     status,
     faultDescription,
   });

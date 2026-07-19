@@ -21,12 +21,27 @@ export default function PilotDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (!authLoading && (!user || user.role !== 'Pilot')) {
-      router.push('/');
-    } else if (user) {
+    if (!authLoading) {
+      if (!user) {
+        router.push('/');
+        return;
+      }
+      const role = user.role.toLowerCase();
+      if (role !== 'pilot') {
+        if (role === 'admin') {
+          router.push('/admin');
+        } else if (role === 'engineer') {
+          router.push('/engineer');
+        } else if (role === 'instructor') {
+          router.push('/instructor');
+        } else {
+          router.push('/');
+        }
+        return;
+      }
       loadData();
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, router]);
 
   const loadData = async () => {
     try {

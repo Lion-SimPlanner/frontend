@@ -23,7 +23,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<User | null>;
   logout: () => void;
   registerPersonnel: (name: string, employeeId: string, email: string, role: string) => Promise<boolean>;
 }
@@ -35,17 +35,27 @@ const CLAIM_EMPLOYEE_CODE = 'employee_code';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function normalizeRole(role: string | undefined): User['role'] | null {
+  if (!role) return null;
+  const normalized = role.trim().toLowerCase();
+  if (normalized === 'admin') return 'Admin';
+  if (normalized === 'engineer') return 'Engineer';
+  if (normalized === 'instructor') return 'Instructor';
+  if (normalized === 'pilot') return 'Pilot';
+  return null;
+}
+
 function buildUserFromToken(token: string): User | null {
   try {
     const decoded = jwtDecode<DecodedToken & Record<string, unknown>>(token);
-    const role = decoded[CLAIM_ROLE] as string | undefined;
+    const role = normalizeRole(decoded[CLAIM_ROLE] as string | undefined);
     if (!role) return null;
     return {
       id:         decoded.sub ?? '',
       name:       (decoded[CLAIM_NAME]  as string) ?? (decoded['name'] as string) ?? '',
       email:      (decoded[CLAIM_EMAIL] as string) ?? (decoded['email'] as string) ?? '',
       employeeId: (decoded[CLAIM_EMPLOYEE_CODE] as string) ?? '',
-      role:       role as User['role'],
+      role,
     };
   } catch {
     return null;
@@ -72,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<User | null> => {
     try {
       const response = await apiClient.post<{
         token: string;
@@ -85,20 +95,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { token: jwt, name, employeeCode, role, userId } = response.data;
 
-      const loggedUser: User = {
-        id:         userId,
+      const parsedFromToken = buildUserFromToken(jwt);
+      const finalUser: User = parsedFromToken ?? {
+        id: userId,
         name,
         email,
         employeeId: employeeCode,
-        role:       role as User['role'],
+        role: normalizeRole(role) ?? 'Pilot',
       };
-
       localStorage.setItem('token', jwt);
+      localStorage.setItem('user', JSON.stringify(finalUser));
       setToken(jwt);
-      setUser(loggedUser);
-      return true;
+      setUser(finalUser);
+      return finalUser;
     } catch {
-      return false;
+      return null;
     }
   };
 

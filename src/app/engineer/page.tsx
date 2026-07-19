@@ -3,14 +3,29 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { getSimulators, setSimulatorStatus, submitMaintenanceChecklist, Simulator } from '@/services/api';
+import { getSimulators, setSimulatorStatus, submitMaintenanceChecklist, getEngineers, getSessions, Simulator, Engineer, SimulatorSession } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
+
+const toLocalDate = (value?: string) => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+};
+
+const formatLocalTime = (value?: string) => {
+  const dt = toLocalDate(value);
+  if (!dt) return 'N/A';
+  return dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+};
 
 export default function EngineerDashboard() {
   const { user, logout, loading: authLoading } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [simulators, setSimulators] = useState<Simulator[]>([]);
+  const [engineers, setEngineers] = useState<Engineer[]>([]);
+  const [sessions, setSessions] = useState<SimulatorSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [maintSignedOff, setMaintSignedOff] = useState(false);
   const [activeFault, setActiveFault] = useState(true);
@@ -23,9 +38,24 @@ export default function EngineerDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (!authLoading && (!user || user.role !== 'Engineer')) {
-      router.push('/');
-    } else if (user) {
+    if (!authLoading) {
+      if (!user) {
+        router.push('/');
+        return;
+      }
+      const role = user.role.toLowerCase();
+      if (role !== 'engineer') {
+        if (role === 'admin') {
+          router.push('/admin');
+        } else if (role === 'instructor') {
+          router.push('/instructor');
+        } else if (role === 'pilot') {
+          router.push('/pilot');
+        } else {
+          router.push('/');
+        }
+        return;
+      }
       loadData();
       startConnection();
       const hub = getHubConnection();
@@ -43,12 +73,14 @@ export default function EngineerDashboard() {
         hub.off('AogReported', handleAogReported);
       };
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, router]);
 
   const loadData = async () => {
     try {
-      const sims = await getSimulators();
+      const [sims, engs, sess] = await Promise.all([getSimulators(), getEngineers(), getSessions()]);
       setSimulators(sims);
+      setEngineers(engs);
+      setSessions(sess);
     } catch (err) {
       console.error(err);
     } finally {
@@ -60,7 +92,9 @@ export default function EngineerDashboard() {
     e.preventDefault();
     try {
       const status = severity === 'AOG' ? 'Down' : 'Up';
-      await setSimulatorStatus('sim-01', status, `[${severity}] [${affectedSystem}] ${failureDescription}`);
+      const targetSimId = simulators.length > 0 ? simulators[0].id : '';
+      if (!targetSimId) throw new Error('No simulator selected for AOG report');
+      await setSimulatorStatus(targetSimId, status, `[${severity}] [${affectedSystem}] ${failureDescription}`);
       setActiveFault(true);
       setShowAogModal(false);
       setAffectedSystem('');
@@ -77,9 +111,12 @@ export default function EngineerDashboard() {
 
   const handleSignOff = async () => {
     try {
+      const targetSimId = simulators.length > 0 ? simulators[0].id : '';
+      if (!targetSimId) throw new Error('No simulator selected for maintenance sign-off');
+      const checklistDate = new Date().toISOString().split('T')[0];
       await submitMaintenanceChecklist({
-        simulatorId: 'sim-01',
-        checklistDate: '2026-07-14',
+        simulatorId: targetSimId,
+        checklistDate,
         isCleared: true,
         notes: 'Pre-flight calibration check passed.',
       });
@@ -101,9 +138,14 @@ export default function EngineerDashboard() {
     );
   }
 
-  const shiftDays = [16, 21, 23, 28, 29, 30];
-  const signedOffDays = [1, 2, 7, 8, 15];
-  const aogDays = [9, 22];
+  const primaryEngineer = engineers[0];
+  const shiftDays = Array.from(new Set(engineers.map((e) => toLocalDate(e.shiftStart)?.getDate()).filter((d): d is number => typeof d === 'number')));
+  const sessionDays = Array.from(new Set(sessions.map((s) => toLocalDate(s.startTime)?.getDate()).filter((d): d is number => typeof d === 'number')));
+  const signedOffDays = sessionDays;
+  const aogDays = simulators
+    .filter((s) => s.status === 'Down' && s.lastChangedAt)
+    .map((s) => toLocalDate(s.lastChangedAt)?.getDate())
+    .filter((d): d is number => typeof d === 'number');
 
   return (
     <div className="h-screen flex bg-white text-gray-900 overflow-hidden font-sans">
@@ -182,11 +224,11 @@ export default function EngineerDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-              Monday, 14 July 2026 • Day Shift • {user.name}
+              Monday, 14 July 2026 • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
             </span>
             <div className="flex items-center gap-1 bg-gray-50 border border-gray-150 px-2 py-1 rounded">
               <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping" />
-              <span className="text-[9px] font-black text-gray-900">13:50:38 LOCAL</span>
+              <span className="text-[9px] font-black text-gray-900">{new Date().toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
             </div>
           </div>
         </header>
