@@ -243,40 +243,40 @@ export default function InstructorDashboard() {
                   : 'N/A';
 
                 return (
-                <div
-                  key={s.sessionId}
-                  onClick={() => setSelectedSession(s)}
-                  className={`p-3 border rounded bg-white cursor-pointer transition-all ${selectedSession?.sessionId === s.sessionId
-                      ? 'border-brand-red shadow-sm'
-                      : 'border-gray-150 hover:border-gray-300'
-                    }`}
-                >
-                  <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
-                  <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
-                  <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
-                    <span>{timeLabel} • {s.phase}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${s.status === 'Completed'
-                        ? 'bg-green-50 text-green-600 border border-green-300'
-                        : s.status === 'Scheduled'
-                          ? 'bg-blue-50 text-blue-600 border border-blue-300'
-                          : 'bg-orange-50 text-orange-600 border border-orange-300'
-                      }`}>
-                      {s.status}
-                    </span>
+                  <div
+                    key={s.sessionId}
+                    onClick={() => setSelectedSession(s)}
+                    className={`p-3 border rounded bg-white cursor-pointer transition-all ${selectedSession?.sessionId === s.sessionId
+                        ? 'border-brand-red shadow-sm'
+                        : 'border-gray-150 hover:border-gray-300'
+                      }`}
+                  >
+                    <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
+                    <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
+                    <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
+                      <span>{timeLabel} • {s.phase}</span>
+                      <span className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${s.status === 'Completed'
+                          ? 'bg-green-50 text-green-600 border border-green-300'
+                          : s.status === 'Scheduled'
+                            ? 'bg-blue-50 text-blue-600 border border-blue-300'
+                            : 'bg-orange-50 text-orange-600 border border-orange-300'
+                        }`}>
+                        {s.status}
+                      </span>
+                    </div>
                   </div>
-                </div>
                 );
               })}
             </div>
           </div>
         </aside>
 
-        <section className="w-[55%] p-6 overflow-y-auto bg-white border-r border-gray-200">
-          <div className="border border-gray-150 rounded p-6 bg-white shadow-sm">
-            <div className="flex items-center justify-between mb-4">
+        <section className="w-[55%] p-6 overflow-y-auto bg-white border-r border-gray-200 flex flex-col">
+          <div className="border border-gray-150 rounded p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between mb-4 shrink-0">
               <div>
-                <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">14-Day Schedule</h3>
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{calendarRangeLabel}</p>
+                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">14-Day Schedule</h3>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">{calendarRangeLabel}</p>
               </div>
               <div className="flex items-center gap-1">
                 <button
@@ -300,81 +300,88 @@ export default function InstructorDashboard() {
               </div>
             </div>
 
-            <div
-              className="grid gap-1 text-center text-xs border-b border-gray-100 pb-2 mb-2 pl-12"
-              style={{ gridTemplateColumns: `repeat(${visibleDayCount}, minmax(60px, 1fr))` }}
-            >
-              {visibleDays.map((day) => (
-                <div key={toLocalDateKey(day)} className="font-black text-[9px] uppercase tracking-wider text-gray-400 py-1">
-                  {day.toLocaleDateString('en-GB', { weekday: 'short' })} {day.getDate()}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex relative h-[420px] bg-white border border-gray-100 rounded">
-              <div className="w-12 border-r border-gray-100 flex flex-col text-right pr-2 pt-8 text-[8px] font-black text-gray-400 select-none uppercase tracking-wider">
-                {Array.from({ length: 13 }).map((_, i) => (
-                  <div key={i} className="h-[35px] flex items-center justify-end">
-                    {String(i + 6).padStart(2, '0')}:00
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex-1 flex relative">
-                <div className="absolute inset-0 pt-8 pointer-events-none flex flex-col">
-                  {Array.from({ length: 12 }).map((_, hourIdx) => (
-                    <div key={hourIdx} className="h-[35px] border-b border-gray-50 w-full" />
+            <div className="overflow-x-auto flex-1 flex flex-col border border-gray-100 rounded">
+              <div className="min-w-[1000px] flex flex-col flex-1">
+                <div
+                  className="grid bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3 shrink-0"
+                  style={{ gridTemplateColumns: `50px repeat(${visibleDayCount}, minmax(65px, 1fr))` }}
+                >
+                  <div>Time</div>
+                  {visibleDays.map((day) => (
+                    <div key={toLocalDateKey(day)} className="border-l border-gray-100 flex flex-col justify-center">
+                      <span>{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+                      <span className="text-xs font-black text-gray-900 mt-0.5">{day.getDate()}</span>
+                    </div>
                   ))}
                 </div>
 
-                {visibleDays.map((day) => {
-                  const dayKey = toLocalDateKey(day);
+                <div className="flex-1 overflow-y-auto relative min-h-[455px] flex bg-white">
+                  <div className="w-12 border-r border-gray-100 flex flex-col text-right pr-2 text-[8px] font-black text-gray-400 select-none uppercase tracking-wider bg-gray-50 shrink-0 z-10">
+                    {Array.from({ length: 13 }).map((_, i) => (
+                      <div key={i} className="h-[35px] flex items-center justify-end border-b border-gray-50 last:border-b-0">
+                        {String(i + 6).padStart(2, '0')}:00
+                      </div>
+                    ))}
+                  </div>
 
-                  return (
-                  <div key={dayKey} className="flex-1 relative pt-8 border-r border-gray-50 last:border-r-0">
-                    {visibleSessions.filter(s => {
-                      const startDate = toLocalDate(s.startTime);
-                      return !!startDate && toLocalDateKey(startDate) === dayKey;
-                    }).map(s => {
-                      const startDate = toLocalDate(s.startTime);
-                      if (!startDate) return null;
-                      const startHour = startDate.getHours();
-                      const startMinute = startDate.getMinutes();
-                      const duration = getSessionDurationHours(s.startTime, s.endTime);
-                      const topOffset = ((startHour - 6) * 35) + ((startMinute / 60) * 35);
-                      const height = duration * 35;
+                  <div className="flex-1 grid relative" style={{ gridTemplateColumns: `repeat(${visibleDayCount}, minmax(65px, 1fr))` }}>
+                    <div className="absolute inset-0 pointer-events-none flex flex-col">
+                      {Array.from({ length: 13 }).map((_, hourIdx) => (
+                        <div key={hourIdx} className="h-[35px] border-b border-gray-50 w-full" />
+                      ))}
+                    </div>
 
-                      if (topOffset < 0 || topOffset > 420) return null;
+                    {visibleDays.map((day) => {
+                      const dayKey = toLocalDateKey(day);
 
                       return (
-                        <div
-                          key={s.sessionId}
-                          onClick={() => setSelectedSession(s)}
-                          style={{
-                            top: `${topOffset}px`,
-                            height: `${height}px`,
-                          }}
-                          className={`absolute left-1 right-1 p-2 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all ${selectedSession?.sessionId === s.sessionId
-                              ? 'bg-brand-red border border-black z-25'
-                              : 'bg-gray-400 hover:bg-gray-500 z-10'
-                            }`}
-                        >
-                          <div>
-                            <div className="text-[9px] font-black uppercase tracking-wider truncate leading-tight">{s.title}</div>
-                            <div className="text-[8px] opacity-80 font-bold truncate mt-0.5">{s.pilotName}</div>
-                          </div>
-                          <span className="text-[7px] font-black uppercase block mt-1">{s.phase}</span>
+                        <div key={dayKey} className="relative border-r border-gray-50 last:border-r-0 h-full">
+                          {visibleSessions.filter(s => {
+                            const startDate = toLocalDate(s.startTime);
+                            return !!startDate && toLocalDateKey(startDate) === dayKey;
+                          }).map(s => {
+                            const startDate = toLocalDate(s.startTime);
+                            if (!startDate) return null;
+                            const startHour = startDate.getHours();
+                            const startMinute = startDate.getMinutes();
+                            const duration = getSessionDurationHours(s.startTime, s.endTime);
+                            const topOffset = ((startHour - 6) * 35) + ((startMinute / 60) * 35);
+                            const height = duration * 35;
+
+                            if (topOffset < 0 || topOffset > 455) return null;
+
+                            return (
+                              <div
+                                key={s.sessionId}
+                                onClick={() => setSelectedSession(s)}
+                                style={{
+                                  top: `${topOffset}px`,
+                                  height: `${height - 2}px`,
+                                }}
+                                className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all z-20 ${selectedSession?.sessionId === s.sessionId
+                                    ? 'bg-brand-red border border-red-800 font-black'
+                                    : 'bg-gray-400 hover:bg-gray-500 font-medium'
+                                  }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-[7.5px] font-black uppercase tracking-wider truncate leading-tight">{s.title}</div>
+                                  <div className="text-[7px] opacity-90 truncate font-bold mt-0.5">{s.pilotName}</div>
+                                </div>
+                                <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })}
                   </div>
-                )})}
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6">
+        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6 shrink-0">
           {selectedSession ? (
             <form onSubmit={handleSubmitSyllabus} className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
               <div className="space-y-4 border-b border-gray-100 pb-4">
@@ -395,7 +402,9 @@ export default function InstructorDashboard() {
                   </div>
                   <div>
                     <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Simulator</span>
-                    <span className="font-black text-gray-900">{selectedSession.simulatorName}</span>
+                    <span className="font-black text-gray-900 truncate max-w-[110px] block" title={selectedSession.simulatorName}>
+                      {selectedSession.simulatorName}
+                    </span>
                   </div>
                   <div>
                     <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Session ID</span>
@@ -411,7 +420,7 @@ export default function InstructorDashboard() {
                   </svg>
                   <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider">Session Details & Grading</h4>
                 </div>
-                <p className="text-[9px] text-gray-450 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
+                <p className="text-[9px] text-gray-455 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
