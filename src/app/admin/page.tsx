@@ -866,43 +866,47 @@ export default function AdminPage() {
                   expiryColorClass = 'text-gray-500 bg-gray-50 border border-gray-300';
                 }
                 return (
-                  <div key={p.pilotId} className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0">
+                  <div key={p.pilotId} className="p-2 border border-gray-150 rounded bg-white flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0 mt-0.5">
                         {p.fullName.split(' ').map(n => n[0]).join('')}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="text-xs font-black text-gray-900 truncate">{p.fullName}</div>
-                        <div className="text-[9px] text-gray-400 uppercase truncate flex items-center gap-1.5 mt-0.5">
-                          <span>{p.rank}</span>
-                          <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none ${expiryColorClass}`}>
+                        <div className="text-[9px] text-gray-400 uppercase flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <span className="truncate">{p.rank}</span>
+                          <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none shrink-0 ${expiryColorClass}`}>
                             EXP IN {expiryDays}D
                           </span>
                         </div>
-                        <div className="mt-1.5 p-1.5 border rounded bg-gray-50">
+                        <div className="mt-1.5 p-1.5 border rounded bg-gray-50 flex flex-col gap-1">
                           {ftl.isClear ? (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider">
+                            <span className="inline-block px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider w-fit">
                               Rest Clear
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
+                            <span className="inline-block px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
                               Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
                             </span>
                           )}
-                          <div className="text-[8px] text-gray-500 uppercase mt-1 truncate">
+                          <div className="text-[8px] text-gray-500 uppercase truncate">
                             Last Duty: {formatLocalTimestamp(p.lastDutyEndTime)} Local
                           </div>
                         </div>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="text-[8px] border border-brand-red text-brand-red px-1 rounded font-black uppercase leading-none">
-                        {p.typeRatings.join(', ')}
-                      </span>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0 max-w-[35%]">
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {p.typeRatings.map((rating, idx) => (
+                          <span key={idx} className="text-[8px] border border-brand-red text-brand-red px-1 py-0.5 rounded font-black uppercase leading-none text-center">
+                            {rating}
+                          </span>
+                        ))}
+                      </div>
                       {selectedSlot && (
                         <button
                           onClick={() => handleAssignCrew(p)}
-                          className="bg-brand-red hover:bg-red-700 text-white text-[8px] font-black uppercase px-1 py-0.5 rounded cursor-pointer leading-none"
+                          className="bg-brand-red hover:bg-red-700 text-white text-[8px] font-black uppercase px-2 py-1 rounded cursor-pointer leading-none"
                         >
                           Assign
                         </button>
@@ -937,11 +941,11 @@ export default function AdminPage() {
                         {(() => {
                           const ftl = getFtlState(i.lastDutyEndTime, referenceSessionStartIso);
                           return ftl.isClear ? (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider">
+                            <span className="inline-block px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider w-fit">
                               Rest Clear
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
+                            <span className="inline-block px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider">
                               Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
                             </span>
                           );
