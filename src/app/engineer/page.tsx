@@ -53,6 +53,8 @@ export default function EngineerDashboard() {
   const [maintSignedOff, setMaintSignedOff] = useState(false);
   const [activeFault, setActiveFault] = useState(false);
 
+  const [currentTime, setCurrentTime] = useState<Date | null>(null);
+
   const [showAogModal, setShowAogModal] = useState(false);
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [affectedSystem, setAffectedSystem] = useState('');
@@ -68,7 +70,17 @@ export default function EngineerDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (!authLoading) {
+    setCurrentTime(new Date());
+    
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && mounted) {
       if (!user) {
         router.push('/');
         return;
@@ -111,7 +123,7 @@ export default function EngineerDashboard() {
         hub.off('AogReported', handleAogReported);
       };
     }
-  }, [user, authLoading, router]);
+  }, [user, authLoading, router, mounted]);
 
   const loadData = async () => {
     try {
@@ -229,7 +241,7 @@ export default function EngineerDashboard() {
     }
   };
 
-  if (authLoading || !user || !mounted || loading) {
+  if (authLoading || !user || !mounted || loading || !currentTime) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-sm font-bold uppercase tracking-widest text-brand-red animate-pulse">
@@ -248,6 +260,7 @@ export default function EngineerDashboard() {
     return normalized === 'AOG' || normalized === 'Defect' || normalized === 'MEL';
   }).length;
   const degradedCount = simulators.filter((s) => normalizeStatusLabel(s.status) === 'MEL').length;
+  
   const shiftDays = Array.from(new Set(engineers.map((e) => toLocalDate(e.shiftStart)?.getDate()).filter((d): d is number => typeof d === 'number')));
   const sessionDays = Array.from(new Set(sessions.map((s) => toLocalDate(s.startTime)?.getDate()).filter((d): d is number => typeof d === 'number')));
   const signedOffDays = sessionDays;
@@ -255,6 +268,14 @@ export default function EngineerDashboard() {
     .filter((s) => (s.status === 'AOG' || s.status === 'Down') && s.lastChangedAt)
     .map((s) => toLocalDate(s.lastChangedAt)?.getDate())
     .filter((d): d is number => typeof d === 'number');
+
+  const todayDayNumber = currentTime.getDate();
+  const topBarDateLabel = currentTime.toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
 
   return (
     <div className="h-screen flex bg-white text-gray-900 overflow-hidden font-sans">
@@ -276,21 +297,6 @@ export default function EngineerDashboard() {
           <nav className="space-y-1">
             <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white">
               Overview
-            </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded text-gray-600 hover:text-brand-red hover:bg-red-50 transition-colors">
-              Maintenance Log
-            </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded text-gray-600 hover:text-brand-red hover:bg-red-50 transition-colors">
-              Shift Schedule
-            </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded text-gray-600 hover:text-brand-red hover:bg-red-50 transition-colors">
-              System Health
-            </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded text-gray-600 hover:text-brand-red hover:bg-red-50 transition-colors">
-              Reports
-            </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded text-gray-600 hover:text-brand-red hover:bg-red-50 transition-colors">
-              Settings
             </button>
           </nav>
         </div>
@@ -333,7 +339,7 @@ export default function EngineerDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-              Monday, 14 July 2026 • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
+              {topBarDateLabel} • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
             </span>
             <button
               onClick={handleCheckout}
@@ -344,7 +350,7 @@ export default function EngineerDashboard() {
             </button>
             <div className="flex items-center gap-1 bg-gray-50 border border-gray-150 px-2 py-1 rounded">
               <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping" />
-              <span className="text-[9px] font-black text-gray-900">{new Date().toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
+              <span className="text-[9px] font-black text-gray-900">{currentTime.toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
             </div>
           </div>
         </header>
@@ -362,7 +368,9 @@ export default function EngineerDashboard() {
             <div className="border border-gray-150 rounded p-6 bg-white shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">July 2026</h3>
+                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">
+                    {currentTime.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+                  </h3>
                   <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Maintenance Shift Calendar</p>
                 </div>
                 <div className="flex gap-1">
@@ -387,13 +395,13 @@ export default function EngineerDashboard() {
                 <div className="border border-transparent py-4 text-transparent">31</div>
                 
                 {Array.from({ length: 31 }, (_, i) => i + 1).map(day => {
-                  const isToday = day === 14;
+                  const isToday = day === todayDayNumber;
                   const isShift = shiftDays.includes(day);
                   const isSignedOff = signedOffDays.includes(day);
                   const isAog = aogDays.includes(day);
 
                   return (
-                    <div key={day} className={`border border-gray-100 py-2 relative flex flex-col items-center justify-between h-14 ${isToday ? 'bg-red-50 border-brand-red' : 'bg-white'}`}>
+                    <div key={day} className={`border border-gray-100 py-2 relative flex flex-col items-center justify-between h-14 ${isToday ? 'bg-red-50 border-brand-red shadow-sm' : 'bg-white'}`}>
                       <span className={`text-[10px] font-black ${isToday ? 'text-brand-red text-xs' : 'text-gray-900'}`}>{day}</span>
                       {isToday && <span className="text-[7px] font-black text-brand-red uppercase leading-none">NOW</span>}
                       <div className="flex gap-0.5 justify-center mt-auto pb-1">
@@ -407,7 +415,9 @@ export default function EngineerDashboard() {
               </div>
 
               <div className="mt-4 border-t border-gray-150 pt-4 flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-900">July 14, 2026 • Daily checklist signed off</span>
+                <span className="text-xs font-bold text-gray-900">
+                  {currentTime.toLocaleDateString('en-GB', { month: 'long', day: 'numeric', year: 'numeric' })} • Daily checklist signed off
+                </span>
                 <span className="bg-green-50 text-green-600 border border-green-500 text-[8px] font-black px-2 py-0.5 rounded uppercase">Complete</span>
               </div>
             </div>
@@ -418,7 +428,9 @@ export default function EngineerDashboard() {
                   <span className="w-2.5 h-2.5 bg-brand-red rounded-full" />
                   <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">Today's Shift Log</h3>
                 </div>
-                <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">14 JUL 2026 • Day Shift</span>
+                <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">
+                  {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()} • Day Shift
+                </span>
               </div>
 
               <div className="space-y-3">
@@ -602,11 +614,11 @@ export default function EngineerDashboard() {
                   </svg>
                 </div>
                 <div className="min-w-0">
-                  <h2 className="text-sm font-black uppercase text-gray-905 leading-none tracking-wider">
+                  <h2 className="text-sm font-black uppercase text-gray-955 leading-none tracking-wider">
                     Aircraft On Ground — AOG Report
                   </h2>
                   <p className="text-[9px] text-gray-400 font-bold uppercase mt-1 tracking-wide">
-                    Jakarta B737 Simulator · SIM-01 · 14 Jul 2026
+                    {currentSimulator ? currentSimulator.name : 'Simulator'} · {currentTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </p>
                 </div>
               </div>
@@ -641,6 +653,7 @@ export default function EngineerDashboard() {
                   <option value="Visual System">Visual System</option>
                   <option value="Flight Controls">Flight Controls</option>
                   <option value="Avionics & Instruments">Avionics & Instruments</option>
+                  <option value="Host Computer">Host Computer</option>
                   <option value="Host Computer">Host Computer</option>
                 </select>
               </div>
@@ -711,7 +724,7 @@ export default function EngineerDashboard() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                   <p className="text-[9px] text-brand-red font-bold leading-normal">
-                    Submitting this report will immediately ground SIM-01 and notify the Shift Supervisor, Safety Officer, and CAA compliance desk.
+                    Submitting this report will immediately ground the selected machine and notify the Shift Supervisor, Safety Officer, and CAA compliance desk.
                   </p>
                 </div>
               )}
