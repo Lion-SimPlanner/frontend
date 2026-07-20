@@ -192,7 +192,7 @@ export default function InstructorDashboard() {
               </svg>
             </span>
             <div className="flex flex-col">
-              <span className="text-xs font-black tracking-widest text-gray-950">SIMFLIGHT OPS</span>
+              <span className="text-xs font-black tracking-widest text-gray-950">LION SIMPLANNER</span>
               <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Instructor Portal</span>
             </div>
           </div>
