@@ -50,6 +50,34 @@ const formatLocalTimestamp = (value?: string) => {
   });
 };
 
+const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
+
+const addLocalDays = (value: Date, days: number) =>
+  new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+
+const toLocalDateKey = (value: Date) => {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const localDateFromKeyAndTime = (dateKey: string, hour: number, minute: number) => {
+  const [year, month, day] = dateKey.split('-').map((segment) => parseInt(segment, 10));
+  return new Date(year, month - 1, day, hour, minute, 0, 0);
+};
+
+const formatCalendarRange = (startDate: Date, days: number) => {
+  const endDate = addLocalDays(startDate, days - 1);
+  const sameMonth = startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear();
+
+  if (sameMonth) {
+    return `${startDate.toLocaleDateString('en-GB', { month: 'long' })} ${startDate.getDate()} - ${endDate.getDate()}, ${startDate.getFullYear()}`;
+  }
+
+  return `${startDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' })} - ${endDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+};
+
 const getFtlState = (lastDutyEndTime: string | undefined, referenceUtcIso: string, minRestHours: number = 10) => {
   const lastDuty = toLocalDate(lastDutyEndTime);
   const reference = toLocalDate(referenceUtcIso);
@@ -78,10 +106,11 @@ export default function AdminPage() {
   const [pilotSearch, setPilotSearch] = useState('');
   const [selectedRatingFilter, setSelectedRatingFilter] = useState<string>('ALL');
 
-  const [selectedSlot, setSelectedSlot] = useState<{ day: number; hour: number } | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<{ dayKey: string; hour: number } | null>(null);
   const [viewedSession, setViewedSession] = useState<SimulatorSession | null>(null);
 
-  const [sessionDay, setSessionDay] = useState<number>(14);
+  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
+  const [sessionDateKey, setSessionDateKey] = useState<string>(() => toLocalDateKey(startOfLocalDay(new Date())));
   const [sessionStartHour, setSessionStartHour] = useState<string>('08');
   const [sessionStartMin, setSessionStartMin] = useState<string>('00');
   const [sessionEndHour, setSessionEndHour] = useState<string>('12');
@@ -286,21 +315,21 @@ export default function AdminPage() {
     setValidationViolations(violations);
   }, [assignedCaptain, assignedFO, assignedInstructor, selectedSimId, selectedSessionType, simulators, selectedSlot]);
 
-  const handleCellClick = (day: number, hour: number) => {
+  const handleCellClick = (dayKey: string, hour: number) => {
     const isOccupied = sessions.some(s => {
       if (s.status === 'Cancelled') return false;
       const start = toLocalDate(s.startTime);
       const end = toLocalDate(s.endTime);
       if (!start || !end) return false;
       const endHour = end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours();
-      return start.getDate() === day && hour >= start.getHours() && hour < endHour;
+      return toLocalDateKey(start) === dayKey && hour >= start.getHours() && hour < endHour;
     });
 
     if (isOccupied) return;
 
     setViewedSession(null);
-    setSelectedSlot({ day, hour });
-    setSessionDay(day);
+    setSelectedSlot({ dayKey, hour });
+    setSessionDateKey(dayKey);
     setSessionStartHour(hour.toString().padStart(2, '0'));
     setSessionStartMin('00');
     setSessionDuration(4);
@@ -387,21 +416,15 @@ export default function AdminPage() {
       return;
     }
 
-    const startTime = new Date(
-      2026,
-      6,
-      sessionDay,
+    const startTime = localDateFromKeyAndTime(
+      sessionDateKey,
       parseInt(sessionStartHour, 10),
-      parseInt(sessionStartMin, 10),
-      0
+      parseInt(sessionStartMin, 10)
     ).toISOString();
-    const endTime = new Date(
-      2026,
-      6,
-      sessionDay,
+    const endTime = localDateFromKeyAndTime(
+      sessionDateKey,
       parseInt(sessionEndHour, 10),
-      parseInt(sessionEndMin, 10),
-      0
+      parseInt(sessionEndMin, 10)
     ).toISOString();
 
     const syllabusId = assignedCaptain!.requiredSyllabus
@@ -519,27 +542,33 @@ export default function AdminPage() {
     return matchesSearch && matchesRating;
   });
 
-  const getDayName = (dayNum: number) => {
-    switch (dayNum) {
-      case 14: return 'Monday';
-      case 15: return 'Tuesday';
-      case 16: return 'Wednesday';
-      case 17: return 'Thursday';
-      case 18: return 'Friday';
-      case 19: return 'Saturday';
-      case 20: return 'Sunday';
-      default: return '';
-    }
+  const visibleDayCount = 14;
+  const visibleDays = Array.from({ length: visibleDayCount }, (_, idx) => addLocalDays(calendarStartDate, idx));
+  const calendarRangeLabel = formatCalendarRange(calendarStartDate, visibleDayCount);
+
+  const goToPreviousWindow = () => {
+    setCalendarStartDate((prev) => addLocalDays(prev, -visibleDayCount));
+    setSelectedSlot(null);
+    setViewedSession(null);
+  };
+
+  const goToNextWindow = () => {
+    setCalendarStartDate((prev) => addLocalDays(prev, visibleDayCount));
+    setSelectedSlot(null);
+    setViewedSession(null);
+  };
+
+  const goToTodayWindow = () => {
+    setCalendarStartDate(startOfLocalDay(new Date()));
+    setSelectedSlot(null);
+    setViewedSession(null);
   };
 
   const referenceSessionStartIso = selectedSlot
-    ? new Date(
-        2026,
-        6,
-        sessionDay,
+    ? localDateFromKeyAndTime(
+        sessionDateKey,
         parseInt(sessionStartHour, 10),
-        parseInt(sessionStartMin, 10),
-        0
+        parseInt(sessionStartMin, 10)
       ).toISOString()
     : new Date().toISOString();
 
@@ -559,12 +588,12 @@ export default function AdminPage() {
     return nowLocal.getTime() >= start.getTime() && nowLocal.getTime() <= end.getTime();
   };
 
-  const hasEngineerCoverage = (day: number, hour: number) => {
+  const hasEngineerCoverage = (dayKey: string, hour: number) => {
     return engineers.some((engineer) => {
       const shiftStart = toLocalDate(engineer.shiftStart);
       const shiftEnd = toLocalDate(engineer.shiftEnd);
       if (!shiftStart || !shiftEnd) return false;
-      if (shiftStart.getDate() !== day) return false;
+      if (toLocalDateKey(shiftStart) !== dayKey) return false;
       return hour >= shiftStart.getHours() && hour < shiftEnd.getHours();
     });
   };
@@ -1008,22 +1037,49 @@ export default function AdminPage() {
         <div className="w-1/2 h-full overflow-y-auto p-6">
           <div className="border border-gray-100 rounded p-6 bg-white shadow-sm">
             <div className="mb-4">
-              <h3 className="text-sm font-black uppercase text-gray-900">
-                Weekly Schedule Grid
-              </h3>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                July 14 – 20, 2026 • Click empty cell to build • Click session to view crew
-              </p>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase text-gray-900">
+                    14-Day Schedule Grid
+                  </h3>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    {calendarRangeLabel} • Click empty cell to build • Click session to view crew
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={goToPreviousWindow}
+                    className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                  >
+                    Prev 14d
+                  </button>
+                  <button
+                    onClick={goToTodayWindow}
+                    className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50"
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={goToNextWindow}
+                    className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                  >
+                    Next 14d
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
-              <div className="min-w-[550px] border border-gray-100 rounded">
-                <div className="grid grid-cols-8 bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3">
+              <div className="min-w-[1200px] border border-gray-100 rounded">
+                <div
+                  className="grid bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3"
+                  style={{ gridTemplateColumns: `80px repeat(${visibleDayCount}, minmax(70px, 1fr))` }}
+                >
                   <div>Time</div>
-                  {[14, 15, 16, 17, 18, 19, 20].map(day => (
-                    <div key={day} className="border-l border-gray-100 flex flex-col justify-center">
-                      <span>{getDayName(day).substring(0, 3)}</span>
-                      <span className="text-xs font-black text-gray-900 mt-0.5">{day}</span>
+                  {visibleDays.map(dayDate => (
+                    <div key={toLocalDateKey(dayDate)} className="border-l border-gray-100 flex flex-col justify-center">
+                      <span>{dayDate.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+                      <span className="text-xs font-black text-gray-900 mt-0.5">{dayDate.getDate()}</span>
                     </div>
                   ))}
                 </div>
@@ -1032,15 +1088,20 @@ export default function AdminPage() {
                   {['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'].map(time => {
                     const hour = parseInt(time.split(':')[0]);
                     return (
-                      <div key={time} className="grid grid-cols-8 min-h-[56px] text-xs">
+                      <div
+                        key={time}
+                        className="grid min-h-[56px] text-xs"
+                        style={{ gridTemplateColumns: `80px repeat(${visibleDayCount}, minmax(70px, 1fr))` }}
+                      >
                         <div className="flex items-center justify-center font-bold text-gray-400 bg-gray-50 border-r border-gray-100 py-2">
                           {time}
                         </div>
-                        {[14, 15, 16, 17, 18, 19, 20].map(day => {
+                        {visibleDays.map(dayDate => {
+                          const dayKey = toLocalDateKey(dayDate);
                           const daySessions = sessions.filter(s => {
                             if (s.status === 'Cancelled') return false;
                             const start = toLocalDate(s.startTime);
-                            return !!start && start.getDate() === day;
+                            return !!start && toLocalDateKey(start) === dayKey;
                           });
 
                           const startingSessions = daySessions.filter(s => {
@@ -1049,17 +1110,17 @@ export default function AdminPage() {
                           });
 
                           const isSelectedDraft = selectedSlot &&
-                            selectedSlot.day === day &&
+                            selectedSlot.dayKey === dayKey &&
                             hour >= selectedSlot.hour &&
                             hour < Math.min(24, selectedSlot.hour + Math.ceil(sessionDuration));
 
-                          const startHourSelected = selectedSlot && selectedSlot.day === day && selectedSlot.hour === hour;
-                          const engineerCovered = hasEngineerCoverage(day, hour);
+                          const startHourSelected = selectedSlot && selectedSlot.dayKey === dayKey && selectedSlot.hour === hour;
+                          const engineerCovered = hasEngineerCoverage(dayKey, hour);
 
                           return (
                             <div
-                              key={day}
-                              onClick={() => handleCellClick(day, hour)}
+                              key={dayKey}
+                              onClick={() => handleCellClick(dayKey, hour)}
                               className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors ${
                                 isSelectedDraft
                                   ? 'bg-red-50'
@@ -1181,7 +1242,7 @@ export default function AdminPage() {
                     return (
                       <>
                         <span className="text-gray-950">
-                          {getDayName(viewedStart.getDate())}, July {viewedStart.getDate()}
+                          {viewedStart.toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                         </span>
                         <div className="text-[9px] text-gray-500 mt-0.5">
                           {viewedStart.getHours().toString().padStart(2, '0')}:
@@ -1259,7 +1320,7 @@ export default function AdminPage() {
                     Session Builder
                   </h3>
                   <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5">
-                    {getDayName(sessionDay)}, July {sessionDay}
+                    {localDateFromKeyAndTime(sessionDateKey, 0, 0).toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                   </p>
                 </div>
                 <button

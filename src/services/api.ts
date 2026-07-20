@@ -86,13 +86,14 @@ export interface Engineer {
   shiftStart?: string;
   shiftEnd?: string;
   isOnCall?: boolean;
+  checkoutTime?: string;
 }
 
 export interface Simulator {
   id: string;
   name: string;
   typeRating: string;
-  status: 'Up' | 'Down';
+  status: 'Ready' | 'AOG' | 'MEL' | 'Defect' | 'Up' | 'Down';
   lastChangedAt?: string;
 }
 
@@ -160,6 +161,7 @@ export const getEngineers = async (): Promise<Engineer[]> => {
     shiftStart: normalizeUtcIso(e.shiftStart),
     shiftEnd: normalizeUtcIso(e.shiftEnd),
     isOnCall: typeof e.isOnCall === 'boolean' ? e.isOnCall : undefined,
+    checkoutTime: normalizeUtcIso(e.checkoutTime),
   }));
 };
 
@@ -169,7 +171,12 @@ export const getSimulators = async (): Promise<Simulator[]> => {
     id: s.id,
     name: s.name,
     typeRating: s.aircraftType,
-    status: s.status === 'Down' ? 'Down' : 'Up',
+    status:
+      s.status === 'AOG' || s.status === 'MEL' || s.status === 'Defect' || s.status === 'Ready'
+        ? s.status
+        : s.status === 'Down'
+          ? 'AOG'
+          : 'Ready',
     lastChangedAt: normalizeUtcIso(s.lastChangedAt),
   }));
 };
@@ -248,4 +255,33 @@ export const setSimulatorStatus = async (
     faultDescription,
   });
   return response.data;
+};
+
+export const resolveDefect = async (
+  simulatorId: string,
+  resolutionDetails: string
+): Promise<{ simulatorId: string; newStatus: string; resolvedAt?: string; verified?: boolean }> => {
+  const valid = ensureUuid(simulatorId);
+  if (!valid) throw new Error('Invalid simulator id');
+  const response = await apiClient.post(`/api/asset/simulators/${valid}/ResolveDefect`, {
+    resolutionDetails,
+  });
+  return {
+    ...response.data,
+    resolvedAt: normalizeUtcIso(response.data?.resolvedAt),
+  };
+};
+
+export const checkoutEngineerShift = async (
+  engineerId: string
+): Promise<{ engineerId: string; checkoutTime: string; verified: boolean }> => {
+  const valid = ensureUuid(engineerId);
+  if (!valid) throw new Error('Invalid engineer id');
+  const response = await apiClient.post(`/api/asset/engineers/${valid}/checkout`, {});
+  const checkoutTime = normalizeUtcIso(response.data?.checkoutTime) ?? new Date().toISOString();
+  return {
+    engineerId: response.data?.engineerId ?? valid,
+    checkoutTime,
+    verified: Boolean(response.data?.verified),
+  };
 };

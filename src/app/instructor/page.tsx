@@ -13,6 +13,43 @@ interface ExtendedSession extends SimulatorSession {
   simulatorName: string;
 }
 
+const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
+
+const addLocalDays = (value: Date, days: number) =>
+  new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+
+const toLocalDate = (value?: string) => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt;
+};
+
+const toLocalDateKey = (value: Date) => {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const formatCalendarRange = (startDate: Date, days: number) => {
+  const endDate = addLocalDays(startDate, days - 1);
+  const sameMonth = startDate.getMonth() === endDate.getMonth() && startDate.getFullYear() === endDate.getFullYear();
+
+  if (sameMonth) {
+    return `${startDate.toLocaleDateString('en-GB', { month: 'long' })} ${startDate.getDate()} - ${endDate.getDate()}, ${startDate.getFullYear()}`;
+  }
+
+  return `${startDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' })} - ${endDate.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+};
+
+const getSessionDurationHours = (start?: string, end?: string) => {
+  const startDate = toLocalDate(start);
+  const endDate = toLocalDate(end);
+  if (!startDate || !endDate) return 2;
+  return Math.max(0.5, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+};
+
 export default function InstructorDashboard() {
   const { user, logout, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -20,6 +57,7 @@ export default function InstructorDashboard() {
   const [sessions, setSessions] = useState<ExtendedSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ExtendedSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
 
   const [techSkills, setTechSkills] = useState('');
   const [crmTeamwork, setCrmTeamwork] = useState('');
@@ -125,9 +163,23 @@ export default function InstructorDashboard() {
     );
   }
 
-  const thisWeekCount = sessions.length;
-  const pendingCount = sessions.filter(s => s.status === 'Scheduled' || s.status === 'Draft').length;
-  const completedCount = sessions.filter(s => s.status === 'Completed').length;
+  const visibleDayCount = 14;
+  const visibleDays = Array.from({ length: visibleDayCount }, (_, idx) => addLocalDays(calendarStartDate, idx));
+  const visibleDayKeys = new Set(visibleDays.map(toLocalDateKey));
+  const visibleSessions = sessions.filter((s) => {
+    const start = toLocalDate(s.startTime);
+    if (!start) return false;
+    return visibleDayKeys.has(toLocalDateKey(start));
+  });
+  const calendarRangeLabel = formatCalendarRange(calendarStartDate, visibleDayCount);
+
+  const goToPreviousWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, -visibleDayCount));
+  const goToNextWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, visibleDayCount));
+  const goToTodayWindow = () => setCalendarStartDate(startOfLocalDay(new Date()));
+
+  const visibleCount = visibleSessions.length;
+  const pendingCount = visibleSessions.filter(s => s.status === 'Scheduled' || s.status === 'Draft').length;
+  const completedCount = visibleSessions.filter(s => s.status === 'Completed').length;
 
   return (
     <div className="h-screen flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
@@ -166,8 +218,8 @@ export default function InstructorDashboard() {
         <aside className="w-[20%] border-r border-gray-200 p-4 space-y-6 overflow-y-auto shrink-0 bg-white">
           <div className="grid grid-cols-3 gap-2">
             <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Week</span>
-              <span className="text-lg font-black text-gray-950 mt-1 block">{thisWeekCount}</span>
+              <span className="text-[10px] text-gray-400 font-bold block uppercase">Window</span>
+              <span className="text-lg font-black text-gray-950 mt-1 block">{visibleCount}</span>
             </div>
             <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Pending</span>
@@ -184,7 +236,13 @@ export default function InstructorDashboard() {
               All Sessions
             </div>
             <div className="space-y-2">
-              {sessions.map(s => (
+              {visibleSessions.map(s => {
+                const localStart = toLocalDate(s.startTime);
+                const timeLabel = localStart
+                  ? localStart.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+                  : 'N/A';
+
+                return (
                 <div
                   key={s.sessionId}
                   onClick={() => setSelectedSession(s)}
@@ -196,7 +254,7 @@ export default function InstructorDashboard() {
                   <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
                   <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
                   <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
-                    <span>{s.startTime.split('T')[1].substring(0, 5)} • {s.phase}</span>
+                    <span>{timeLabel} • {s.phase}</span>
                     <span className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${s.status === 'Completed'
                         ? 'bg-green-50 text-green-600 border border-green-300'
                         : s.status === 'Scheduled'
@@ -207,7 +265,8 @@ export default function InstructorDashboard() {
                     </span>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </aside>
@@ -216,20 +275,45 @@ export default function InstructorDashboard() {
           <div className="border border-gray-150 rounded p-6 bg-white shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">Weekly Schedule</h3>
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">July 14–20, 2026</p>
+                <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">14-Day Schedule</h3>
+                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">{calendarRangeLabel}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={goToPreviousWindow}
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                >
+                  Prev 14d
+                </button>
+                <button
+                  onClick={goToTodayWindow}
+                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50"
+                >
+                  Today
+                </button>
+                <button
+                  onClick={goToNextWindow}
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                >
+                  Next 14d
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-7 gap-1 text-center text-xs border-b border-gray-100 pb-2 mb-2 pl-12">
-              {['MON 14', 'TUE 15', 'WED 16', 'THU 17', 'FRI 18', 'SAT 19', 'SUN 20'].map(d => (
-                <div key={d} className="font-black text-[9px] uppercase tracking-wider text-gray-400 py-1">{d}</div>
+            <div
+              className="grid gap-1 text-center text-xs border-b border-gray-100 pb-2 mb-2 pl-12"
+              style={{ gridTemplateColumns: `repeat(${visibleDayCount}, minmax(60px, 1fr))` }}
+            >
+              {visibleDays.map((day) => (
+                <div key={toLocalDateKey(day)} className="font-black text-[9px] uppercase tracking-wider text-gray-400 py-1">
+                  {day.toLocaleDateString('en-GB', { weekday: 'short' })} {day.getDate()}
+                </div>
               ))}
             </div>
 
             <div className="flex relative h-[420px] bg-white border border-gray-100 rounded">
               <div className="w-12 border-r border-gray-100 flex flex-col text-right pr-2 pt-8 text-[8px] font-black text-gray-400 select-none uppercase tracking-wider">
-                {Array.from({ length: 11 }).map((_, i) => (
+                {Array.from({ length: 13 }).map((_, i) => (
                   <div key={i} className="h-[35px] flex items-center justify-end">
                     {String(i + 6).padStart(2, '0')}:00
                   </div>
@@ -238,18 +322,29 @@ export default function InstructorDashboard() {
 
               <div className="flex-1 flex relative">
                 <div className="absolute inset-0 pt-8 pointer-events-none flex flex-col">
-                  {Array.from({ length: 10 }).map((_, hourIdx) => (
+                  {Array.from({ length: 12 }).map((_, hourIdx) => (
                     <div key={hourIdx} className="h-[35px] border-b border-gray-50 w-full" />
                   ))}
                 </div>
 
-                {[14, 15, 16, 17, 18, 19, 20].map((dayNum) => (
-                  <div key={dayNum} className="flex-1 relative pt-8 border-r border-gray-50 last:border-r-0">
-                    {sessions.filter(s => parseInt(s.startTime.split('T')[0].split('-')[2]) === dayNum).map(s => {
-                      const startHour = parseInt(s.startTime.split('T')[1].split(':')[0]);
-                      const duration = 2.5;
-                      const topOffset = (startHour - 6) * 35;
+                {visibleDays.map((day) => {
+                  const dayKey = toLocalDateKey(day);
+
+                  return (
+                  <div key={dayKey} className="flex-1 relative pt-8 border-r border-gray-50 last:border-r-0">
+                    {visibleSessions.filter(s => {
+                      const startDate = toLocalDate(s.startTime);
+                      return !!startDate && toLocalDateKey(startDate) === dayKey;
+                    }).map(s => {
+                      const startDate = toLocalDate(s.startTime);
+                      if (!startDate) return null;
+                      const startHour = startDate.getHours();
+                      const startMinute = startDate.getMinutes();
+                      const duration = getSessionDurationHours(s.startTime, s.endTime);
+                      const topOffset = ((startHour - 6) * 35) + ((startMinute / 60) * 35);
                       const height = duration * 35;
+
+                      if (topOffset < 0 || topOffset > 420) return null;
 
                       return (
                         <div
@@ -273,7 +368,7 @@ export default function InstructorDashboard() {
                       );
                     })}
                   </div>
-                ))}
+                )})}
               </div>
             </div>
           </div>
@@ -287,7 +382,7 @@ export default function InstructorDashboard() {
                   {selectedSession.status}
                 </span>
                 <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1">{selectedSession.title}</h3>
-                <div className="text-[9px] text-gray-400 font-bold uppercase">{selectedSession.startTime.replace('T', ' ')}</div>
+                <div className="text-[9px] text-gray-400 font-bold uppercase">{toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}</div>
 
                 <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1">
                   <div>
@@ -414,7 +509,7 @@ export default function InstructorDashboard() {
             </form>
           ) : (
             <div className="border border-gray-150 rounded p-6 bg-white text-center text-gray-400 text-xs font-bold py-12 uppercase tracking-wider">
-              Select a weekly session to grade
+              Select a session in the visible 14-day window to grade
             </div>
           )}
         </aside>
