@@ -95,6 +95,7 @@ export interface Simulator {
   typeRating: string;
   status: 'Ready' | 'AOG' | 'MEL' | 'Defect' | 'Up' | 'Down';
   lastChangedAt?: string;
+  lastDailySignOffDate: string | null;
 }
 
 export interface SimulatorSession {
@@ -178,6 +179,9 @@ export const getSimulators = async (): Promise<Simulator[]> => {
           ? 'AOG'
           : 'Ready',
     lastChangedAt: normalizeUtcIso(s.lastChangedAt),
+    lastDailySignOffDate: typeof s.lastDailySignOffDate === 'string' && s.lastDailySignOffDate.trim() !== ''
+      ? s.lastDailySignOffDate
+      : null,
   }));
 };
 
@@ -237,8 +241,18 @@ export const submitMaintenanceChecklist = async (req: {
   isCleared: boolean;
   notes: string;
   blockingReason?: string;
+  lastDailySignOffDate?: string | null;
 }): Promise<{ checklistId: string; simulatorId: string; isCleared: boolean; shieldStatus: string }> => {
   const sanitized = sanitizePayload(req as Record<string, any>, ['simulatorId'], ['simulatorId', 'checklistDate']);
+  if (sanitized.isCleared === true) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    sanitized.lastDailySignOffDate = `${year}-${month}-${day}`;
+  } else {
+    sanitized.lastDailySignOffDate = null;
+  }
   const response = await apiClient.post('/api/asset/maintenance/checklist', sanitized);
   return response.data;
 };

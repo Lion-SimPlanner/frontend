@@ -14,6 +14,13 @@ const toLocalDate = (value?: string) => {
   return dt;
 };
 
+const toLocalDateKey = (value: Date) => {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 const formatLocalTime = (value?: string) => {
   const dt = toLocalDate(value);
   if (!dt) return 'N/A';
@@ -50,15 +57,20 @@ export default function EngineerDashboard() {
   const [engineers, setEngineers] = useState<Engineer[]>([]);
   const [sessions, setSessions] = useState<SimulatorSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [maintSignedOff, setMaintSignedOff] = useState(false);
   const [activeFault, setActiveFault] = useState(false);
 
   const [currentTime, setCurrentTime] = useState<Date | null>(null);
 
   const [showAogModal, setShowAogModal] = useState(false);
+  const [showMaintModal, setShowMaintModal] = useState(false);
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [affectedSystem, setAffectedSystem] = useState('');
   const [failureDescription, setFailureDescription] = useState('');
+  const [maintTargetSimId, setMaintTargetSimId] = useState('');
+  const [maintIsCleared, setMaintIsCleared] = useState(true);
+  const [maintNotes, setMaintNotes] = useState('');
+  const [maintPending, setMaintPending] = useState(false);
+  const [maintError, setMaintError] = useState<string | null>(null);
   const [resolutionDetails, setResolutionDetails] = useState('');
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [isResolving, setIsResolving] = useState(false);
@@ -143,7 +155,7 @@ export default function EngineerDashboard() {
     e.preventDefault();
     try {
       const status = severity;
-      const targetSimId = simulators.length > 0 ? simulators[0].id : '';
+      const targetSimId = currentSimulator?.id ?? '';
       if (!targetSimId) throw new Error('No simulator selected for AOG report');
       await setSimulatorStatus(targetSimId, status, `[${severity}] [${affectedSystem}] ${failureDescription}`);
       setActiveFault(true);
@@ -161,9 +173,14 @@ export default function EngineerDashboard() {
   };
 
   const handleResolveDefect = async () => {
-    const targetSimulator = simulators.find((s) => !isReadyStatus(s.status));
+    const targetSimulator = currentSimulator;
     if (!targetSimulator) {
       setResolveError('No active simulator defect to resolve.');
+      return;
+    }
+
+    if (isReadyStatus(targetSimulator.status)) {
+      setResolveError('Current simulator has no active defect to resolve.');
       return;
     }
 
@@ -223,22 +240,52 @@ export default function EngineerDashboard() {
   };
 
   const handleSignOff = async () => {
-    try {
-      const targetSimId = simulators.length > 0 ? simulators[0].id : '';
-      if (!targetSimId) throw new Error('No simulator selected for maintenance sign-off');
-      const checklistDate = new Date().toISOString().split('T')[0];
-      await submitMaintenanceChecklist({
-        simulatorId: targetSimId,
-        checklistDate,
-        isCleared: true,
-        notes: 'Pre-flight calibration check passed.',
-      });
-      setMaintSignedOff(true);
-      await loadData();
-      alert('Daily simulator checklist signed off successfully.');
-    } catch (err) {
-      console.error(err);
+    const targetSimId = currentSimulator?.id ?? simulators[0]?.id ?? '';
+    if (!targetSimId) return;
+    setMaintTargetSimId(targetSimId);
+    setMaintIsCleared(true);
+    setMaintNotes('Pre-flight calibration check passed.');
+    setMaintError(null);
+    setShowMaintModal(true);
+  };
+
+  const handleSubmitMaintenanceSignOff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!maintTargetSimId) {
+      setMaintError('No simulator selected for maintenance sign-off.');
+      return;
     }
+
+    setMaintPending(true);
+    setMaintError(null);
+    try {
+      const checklistDate = toLocalDateKey(new Date());
+      await submitMaintenanceChecklist({
+        simulatorId: maintTargetSimId,
+        checklistDate,
+        isCleared: maintIsCleared,
+        notes: maintNotes,
+      });
+
+      setSimulators((prev) =>
+        prev.map((sim) =>
+          sim.id === maintTargetSimId
+            ? { ...sim, lastDailySignOffDate: maintIsCleared ? checklistDate : null }
+            : sim
+        )
+      );
+
+      setShowMaintModal(false);
+      setMaintNotes('');
+      await loadData();
+      setShowSuccessToast(true);
+      setTimeout(() => {
+        setShowSuccessToast(false);
+      }, 5000);
+    } catch (err) {
+      setMaintError('Failed to submit daily readiness checklist.');
+    }
+    setMaintPending(false);
   };
 
   if (authLoading || !user || !mounted || loading || !currentTime) {
@@ -251,9 +298,19 @@ export default function EngineerDashboard() {
     );
   }
 
-  const primaryEngineer = engineers[0];
-  const activeDefectSimulator = simulators.find((sim) => !isReadyStatus(sim.status));
-  const currentSimulator = activeDefectSimulator ?? simulators[0] ?? null;
+  const primaryEngineer =
+    engineers.find((e) => e.employeeCode === user.employeeId)
+    ?? engineers[0]
+    ?? null;
+
+  const assignedSimulator = primaryEngineer
+    ? simulators.find((sim) => sim.typeRating === primaryEngineer.assignedSim)
+    : null;
+
+  const currentSimulator = assignedSimulator ?? simulators[0] ?? null;
+  const todayDateKey = toLocalDateKey(currentTime);
+  const currentSimulatorSignOffDate = currentSimulator?.lastDailySignOffDate ?? null;
+  const isCurrentSimulatorSignedOffToday = currentSimulatorSignOffDate === todayDateKey;
   const currentStatus = currentSimulator ? normalizeStatusLabel(currentSimulator.status) : 'Ready';
   const faultCount = simulators.filter((s) => {
     const normalized = normalizeStatusLabel(s.status);
@@ -263,7 +320,16 @@ export default function EngineerDashboard() {
   
   const shiftDays = Array.from(new Set(engineers.map((e) => toLocalDate(e.shiftStart)?.getDate()).filter((d): d is number => typeof d === 'number')));
   const sessionDays = Array.from(new Set(sessions.map((s) => toLocalDate(s.startTime)?.getDate()).filter((d): d is number => typeof d === 'number')));
-  const signedOffDays = sessionDays;
+  const signedOffDays = Array.from(new Set(
+    simulators
+      .map((sim) => sim.lastDailySignOffDate)
+      .filter((v): v is string => typeof v === 'string' && v.length === 10)
+      .map((dateValue) => {
+        const dt = toLocalDate(`${dateValue}T00:00:00`);
+        return dt?.getDate();
+      })
+      .filter((d): d is number => typeof d === 'number')
+  ));
   const aogDays = simulators
     .filter((s) => (s.status === 'AOG' || s.status === 'Down') && s.lastChangedAt)
     .map((s) => toLocalDate(s.lastChangedAt)?.getDate())
@@ -284,7 +350,7 @@ export default function EngineerDashboard() {
           <div className="flex items-center gap-3">
             <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain" />
             <div className="flex flex-col">
-              <span className="text-xs font-black tracking-widest text-gray-950">SIMFLIGHT</span>
+              <span className="text-xs font-black tracking-widest text-gray-950">LION SIMPLANNER</span>
               <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Engineering</span>
             </div>
           </div>
@@ -512,6 +578,10 @@ export default function EngineerDashboard() {
               <div className="space-y-1">
                 <h4 className="text-xs font-black text-gray-900">Target Machine: {currentSimulator?.name ?? 'N/A'}</h4>
                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{currentSimulator ? `${currentSimulator.typeRating} • STATUS: ${currentStatus}` : 'No simulator selected'}</p>
+                <div className={`mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-wider ${isCurrentSimulatorSignedOffToday ? 'bg-green-50 text-green-700 border-green-400' : 'bg-orange-50 text-orange-700 border-orange-300'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isCurrentSimulatorSignedOffToday ? 'bg-green-500' : 'bg-orange-500'}`} />
+                  <span>{isCurrentSimulatorSignedOffToday ? 'Daily Sign-Off Cleared' : 'Daily Sign-Off Pending'}</span>
+                </div>
               </div>
 
               <div className="space-y-2.5">
@@ -585,17 +655,17 @@ export default function EngineerDashboard() {
                     setResolveError(null);
                     setShowResolveModal(true);
                   }}
-                  disabled={!activeDefectSimulator}
+                  disabled={!currentSimulator || isReadyStatus(currentSimulator.status)}
                   className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest rounded transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-green-600 cursor-pointer disabled:opacity-50"
                 >
                   Resolve Defect
                 </button>
                 <button
                   onClick={handleSignOff}
-                  disabled={maintSignedOff}
+                  disabled={maintPending}
                   className="w-full py-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 font-black text-xs uppercase tracking-widest rounded transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer disabled:opacity-50"
                 >
-                  {maintSignedOff ? 'Maintenance Signed Off' : 'Sign-off Daily Maintenance'}
+                  {maintPending ? 'Submitting Checklist...' : 'Sign-off Daily Maintenance'}
                 </button>
               </div>
             </div>
@@ -751,7 +821,7 @@ export default function EngineerDashboard() {
 
       <ResolveDefectModal
         isOpen={showResolveModal}
-        simulatorName={activeDefectSimulator?.name ?? 'No Active Defect'}
+        simulatorName={currentSimulator?.name ?? 'No Simulator Assigned'}
         resolutionDetails={resolutionDetails}
         onResolutionDetailsChange={setResolutionDetails}
         onClose={() => {
@@ -763,6 +833,80 @@ export default function EngineerDashboard() {
         isSubmitting={isResolving}
         errorMessage={resolveError}
       />
+
+      {showMaintModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
+            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+              Maintenance Shield Checklist Sign-Off
+            </h3>
+            <form onSubmit={handleSubmitMaintenanceSignOff} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Select Simulator
+                </label>
+                <select
+                  value={maintTargetSimId}
+                  onChange={(e) => setMaintTargetSimId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900"
+                >
+                  {simulators.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="engineer-cleared"
+                  checked={maintIsCleared}
+                  onChange={(e) => setMaintIsCleared(e.target.checked)}
+                  className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red"
+                />
+                <label htmlFor="engineer-cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider">
+                  Checklist Cleared (Raise Shield)
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Engineering Notes
+                </label>
+                <textarea
+                  required
+                  value={maintNotes}
+                  onChange={(e) => setMaintNotes(e.target.value)}
+                  placeholder="Notes from safety checks and compliance checklist..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
+                  rows={3}
+                />
+              </div>
+
+              {maintError && (
+                <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold">
+                  {maintError}
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowMaintModal(false)}
+                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={maintPending}
+                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
+                >
+                  {maintPending ? 'Submitting...' : 'Sign Off Checklist'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showSuccessToast && (
         <div className="fixed bottom-5 right-5 z-55 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded p-3 shadow-md flex items-center gap-2 animate-in slide-in-from-bottom-5">
