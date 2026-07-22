@@ -14,6 +14,8 @@ import {
   publishSession,
   rescheduleSession,
   cancelSession,
+  terminateSessionEarly,
+  startSession,
   setSimulatorStatus,
   submitMaintenanceChecklist,
   PilotPriority,
@@ -221,6 +223,64 @@ export default function AdminPage() {
   const [externalContactNumber, setExternalContactNumber] = useState('');
   const [externalCompanyName, setExternalCompanyName] = useState('');
   const [externalUserError, setExternalUserError] = useState<string | null>(null);
+
+  const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [terminateSessionTarget, setTerminateSessionTarget] = useState<SimulatorSession | null>(null);
+  const [terminateReason, setTerminateReason] = useState('Simulator AOG');
+  const [terminateActualEndHour, setTerminateActualEndHour] = useState('10');
+  const [terminateActualEndMin, setTerminateActualEndMin] = useState('00');
+  const [terminateError, setTerminateError] = useState<string | null>(null);
+
+  const handleOpenTerminateModal = (session: SimulatorSession) => {
+    const now = new Date();
+    setTerminateSessionTarget(session);
+    setTerminateActualEndHour(now.getHours().toString().padStart(2, '0'));
+    setTerminateActualEndMin(now.getMinutes().toString().padStart(2, '0'));
+    setTerminateReason('Simulator AOG');
+    setTerminateError(null);
+    setShowTerminateModal(true);
+  };
+
+  const handleConfirmTerminateEarly = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!terminateSessionTarget) return;
+
+    const start = toLocalDate(terminateSessionTarget.startTime);
+    if (!start) return;
+
+    const actualEndDate = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate(),
+      parseInt(terminateActualEndHour, 10),
+      parseInt(terminateActualEndMin, 10)
+    );
+
+    try {
+      const updated = await terminateSessionEarly(
+        terminateSessionTarget.sessionId,
+        actualEndDate.toISOString(),
+        terminateReason
+      );
+      setShowTerminateModal(false);
+      setViewedSession(updated);
+      await loadData();
+    } catch (err: any) {
+      setTerminateError(err.response?.data?.message || 'Failed to terminate session early.');
+    }
+  };
+
+  const handleStartSession = async (session: SimulatorSession) => {
+    try {
+      const updated = await startSession(session.sessionId);
+      setViewedSession(updated);
+      await loadData();
+      alert(`Session started! Status is now IN PROGRESS.`);
+    } catch (err: any) {
+      console.error('[Admin] Failed to start session:', err);
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to start session.');
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<'Dashboard' | 'Engineers' | 'Instructors'>('Dashboard');
   const [selectedHwSimId, setSelectedHwSimId] = useState<string>('');
@@ -1378,16 +1438,54 @@ export default function AdminPage() {
                   </button>
                 </div>
 
-                {viewedSession.status === 'Scheduled' && !isRescheduleMode && (
-                  <button
-                    onClick={handleStartReschedule}
-                    className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
-                  >
-                    Edit / Reschedule
-                  </button>
+                {(viewedSession.status === 'InProgress' || viewedSession.status === 'Scheduled') && !isRescheduleMode && (
+                  <div className="space-y-2 shrink-0">
+                    {viewedSession.status === 'Scheduled' && (
+                      <button
+                        onClick={() => handleStartSession(viewedSession)}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shadow-sm"
+                      >
+                        Start Session
+                      </button>
+                    )}
+                    {viewedSession.status === 'Scheduled' && (
+                      <button
+                        onClick={handleStartReschedule}
+                        className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors"
+                      >
+                        Edit / Reschedule
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleOpenTerminateModal(viewedSession)}
+                      className="w-full bg-amber-600 hover:bg-amber-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors"
+                    >
+                      Terminate Early
+                    </button>
+                  </div>
                 )}
 
                 <div className="space-y-3.5 text-xs font-bold text-gray-700 min-w-0">
+                  <div className="min-w-0">
+                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Status</span>
+                    <span className={`px-2 py-0.5 border text-[9px] font-black rounded uppercase inline-block ${
+                      viewedSession.status === 'Completed'
+                        ? 'bg-green-50 text-green-700 border-green-400'
+                        : viewedSession.status === 'InProgress'
+                          ? 'bg-amber-50 text-amber-700 border-amber-400 animate-pulse'
+                          : viewedSession.status === 'TerminatedEarly'
+                            ? 'bg-purple-50 text-purple-700 border-purple-400'
+                            : viewedSession.status === 'Cancelled'
+                              ? 'bg-red-50 text-brand-red border-brand-red'
+                              : 'bg-blue-50 text-blue-700 border-blue-400'
+                    }`}>
+                      {viewedSession.status}
+                    </span>
+                    {viewedSession.terminationReason && (
+                      <div className="text-[9px] font-bold text-purple-700 mt-1">Reason: {viewedSession.terminationReason}</div>
+                    )}
+                  </div>
+
                   <div className="min-w-0">
                     <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Session Type</span>
                     <span className="text-xs font-black text-gray-900 uppercase truncate block">{viewedSession.sessionType}</span>
@@ -1892,29 +1990,30 @@ export default function AdminPage() {
                   onChange={(e) => setMaintSimId(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900"
                 >
-                  {simulators.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
+                  {simulators.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.typeRating})
+                    </option>
                   ))}
                 </select>
               </div>
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  id="cleared"
+                  id="maintIsCleared"
                   checked={maintIsCleared}
                   onChange={(e) => setMaintIsCleared(e.target.checked)}
-                  className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red"
+                  className="rounded border-gray-300 text-brand-red focus:ring-brand-red"
                 />
-                <label htmlFor="cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  Checklist Cleared (Raise Shield)
+                <label htmlFor="maintIsCleared" className="text-xs font-bold text-gray-700 uppercase">
+                  Clear Maintenance Shield (Ready for operations)
                 </label>
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Engineering Notes
+                  Checklist Notes
                 </label>
                 <textarea
-                  required
                   value={maintNotes}
                   onChange={(e) => setMaintNotes(e.target.value)}
                   placeholder="Notes from safety checks and compliance checklist..."
@@ -1935,6 +2034,96 @@ export default function AdminPage() {
                   className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer"
                 >
                   Sign Off Checklist
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showTerminateModal && terminateSessionTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-200 p-6 rounded-lg shadow-xl max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
+                Terminate Session Early
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowTerminateModal(false)}
+                className="text-xs font-black text-gray-400 hover:text-brand-red uppercase"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1">
+              <span className="font-black uppercase block text-amber-900">Warning</span>
+              <p>This will log the completed hours and instantly release the remaining schedule block.</p>
+            </div>
+
+            <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
+              <div>
+                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                  Actual End Time
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={terminateActualEndHour}
+                    onChange={(e) => setTerminateActualEndHour(e.target.value)}
+                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                  >
+                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
+                      <option key={hr} value={hr}>{hr}:00</option>
+                    ))}
+                  </select>
+                  <select
+                    value={terminateActualEndMin}
+                    onChange={(e) => setTerminateActualEndMin(e.target.value)}
+                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                  >
+                    {['00', '15', '30', '45'].map((min) => (
+                      <option key={min} value={min}>{min} min</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                  Termination Reason
+                </label>
+                <select
+                  value={terminateReason}
+                  onChange={(e) => setTerminateReason(e.target.value)}
+                  className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red"
+                >
+                  <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
+                  <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
+                  <option value="Operational Emergency">Operational Emergency</option>
+                  <option value="Weather / Environmental">Weather / Facility Failure</option>
+                </select>
+              </div>
+
+              {terminateError && (
+                <div className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded">
+                  {terminateError}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTerminateModal(false)}
+                  className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-colors"
+                >
+                  Confirm Termination
                 </button>
               </div>
             </form>
