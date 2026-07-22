@@ -107,8 +107,11 @@ export interface SimulatorSession {
   startTime: string;
   endTime: string;
   captainId?: string;
+  captainName?: string;
   firstOfficerId?: string;
+  firstOfficerName?: string;
   instructorId?: string;
+  instructorName?: string;
   engineerId?: string;
   syllabusId: string;
   traineeEmployeeCode: string;

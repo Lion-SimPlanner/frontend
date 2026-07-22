@@ -83,7 +83,7 @@ export default function EngineerDashboard() {
   useEffect(() => {
     setMounted(true);
     setCurrentTime(new Date());
-    
+
     const timer = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
@@ -118,14 +118,14 @@ export default function EngineerDashboard() {
           prev.map((s) =>
             s.id === payload.simulatorId
               ? {
-                  ...s,
-                  status:
-                    payload.status === 'AOG' || payload.status === 'MEL' || payload.status === 'Defect' || payload.status === 'Ready'
-                      ? payload.status
-                      : payload.status === 'Down'
-                        ? 'AOG'
-                        : 'Ready',
-                }
+                ...s,
+                status:
+                  payload.status === 'AOG' || payload.status === 'MEL' || payload.status === 'Defect' || payload.status === 'Ready'
+                    ? payload.status
+                    : payload.status === 'Down'
+                      ? 'AOG'
+                      : 'Ready',
+              }
               : s
           )
         );
@@ -317,7 +317,7 @@ export default function EngineerDashboard() {
     return normalized === 'AOG' || normalized === 'Defect' || normalized === 'MEL';
   }).length;
   const degradedCount = simulators.filter((s) => normalizeStatusLabel(s.status) === 'MEL').length;
-  
+
   const shiftDays = Array.from(new Set(engineers.map((e) => toLocalDate(e.shiftStart)?.getDate()).filter((d): d is number => typeof d === 'number')));
   const sessionDays = Array.from(new Set(sessions.map((s) => toLocalDate(s.startTime)?.getDate()).filter((d): d is number => typeof d === 'number')));
   const signedOffDays = Array.from(new Set(
@@ -459,7 +459,7 @@ export default function EngineerDashboard() {
 
                 <div className="border border-transparent py-4 text-transparent">30</div>
                 <div className="border border-transparent py-4 text-transparent">31</div>
-                
+
                 {Array.from({ length: 31 }, (_, i) => i + 1).map(day => {
                   const isToday = day === todayDayNumber;
                   const isShift = shiftDays.includes(day);
@@ -566,13 +566,12 @@ export default function EngineerDashboard() {
                   <span className="text-[8px] font-black text-brand-red uppercase tracking-wider">Hardware Health Monitor</span>
                   <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider mt-0.5">Hardware Status</h3>
                 </div>
-                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase border ${
-                  currentStatus === 'Ready'
+                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase border ${currentStatus === 'Ready'
                     ? 'bg-green-50 text-green-700 border-green-500'
                     : currentStatus === 'MEL'
                       ? 'bg-orange-50 text-orange-600 border-orange-400'
                       : 'bg-red-50 text-brand-red border-brand-red'
-                }`}>{currentStatus}</span>
+                  }`}>{currentStatus}</span>
               </div>
 
               <div className="space-y-1">
@@ -706,7 +705,7 @@ export default function EngineerDashboard() {
                 </svg>
               </button>
             </div>
-            
+
             <form onSubmit={handleAogSubmit} className="p-5 space-y-4">
               <div>
                 <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
@@ -736,11 +735,10 @@ export default function EngineerDashboard() {
                   <button
                     type="button"
                     onClick={() => setSeverity('AOG')}
-                    className={`p-3 border rounded text-left transition-all relative ${
-                      severity === 'AOG'
+                    className={`p-3 border rounded text-left transition-all relative ${severity === 'AOG'
                         ? 'border-brand-red bg-red-50 text-brand-red shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     <span className="text-[10px] font-black uppercase tracking-wider block">AOG</span>
                     <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Grounded</span>
@@ -749,11 +747,10 @@ export default function EngineerDashboard() {
                   <button
                     type="button"
                     onClick={() => setSeverity('MEL')}
-                    className={`p-3 border rounded text-left transition-all relative ${
-                      severity === 'MEL'
+                    className={`p-3 border rounded text-left transition-all relative ${severity === 'MEL'
                         ? 'border-orange-500 bg-orange-50 text-orange-500 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     <span className="text-[10px] font-black uppercase tracking-wider block">MEL</span>
                     <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Dispatch with limits</span>
@@ -762,11 +759,10 @@ export default function EngineerDashboard() {
                   <button
                     type="button"
                     onClick={() => setSeverity('Defect')}
-                    className={`p-3 border rounded text-left transition-all relative ${
-                      severity === 'Defect'
+                    className={`p-3 border rounded text-left transition-all relative ${severity === 'Defect'
                         ? 'border-yellow-500 bg-yellow-50 text-yellow-600 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                    }`}
+                      }`}
                   >
                     <span className="text-[10px] font-black uppercase tracking-wider block">Defect</span>
                     <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Log & monitor</span>
@@ -801,13 +797,12 @@ export default function EngineerDashboard() {
 
               <button
                 type="submit"
-                className={`w-full py-3.5 flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none cursor-pointer text-white ${
-                  severity === 'AOG'
+                className={`w-full py-3.5 flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none cursor-pointer text-white ${severity === 'AOG'
                     ? 'bg-brand-red hover:bg-red-700 focus:ring-2 focus:ring-brand-red'
                     : severity === 'MEL'
-                    ? 'bg-orange-500 hover:bg-orange-600 focus:ring-2 focus:ring-orange-500'
-                    : 'bg-yellow-600 hover:bg-yellow-700 focus:ring-2 focus:ring-yellow-600'
-                }`}
+                      ? 'bg-orange-500 hover:bg-orange-600 focus:ring-2 focus:ring-orange-500'
+                      : 'bg-yellow-600 hover:bg-yellow-700 focus:ring-2 focus:ring-yellow-600'
+                  }`}
               >
                 <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
