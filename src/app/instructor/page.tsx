@@ -114,13 +114,16 @@ export default function InstructorDashboard() {
         const startHour = new Date(s.startTime).getHours();
         const phase =
           startHour < 9 ? 'Phase 1' :
-          startHour < 12 ? 'Phase 2' :
-          startHour < 15 ? 'Phase 3' : 'Phase 4';
+            startHour < 12 ? 'Phase 2' :
+              startHour < 15 ? 'Phase 3' : 'Phase 4';
+        const captain = s.captainName || (s.captainId ? `Captain ${s.captainId.substring(0, 6)}` : 'Unassigned');
+        const fo = s.firstOfficerName || (s.firstOfficerId ? `FO ${s.firstOfficerId.substring(0, 6)}` : 'Unassigned');
+        const pilotName = s.traineeEmployeeCode ? `${s.traineeEmployeeCode} • ${captain}` : `${captain} / ${fo}`;
         return {
           ...s,
           title: syllabusLabel,
           phase,
-          pilotName: s.traineeEmployeeCode,
+          pilotName,
           simulatorName: s.simulatorId,
         };
       });
@@ -186,11 +189,7 @@ export default function InstructorDashboard() {
       <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded bg-brand-red text-white flex items-center justify-center font-black">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
-            </span>
+            <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
             <div className="flex flex-col">
               <span className="text-xs font-black tracking-widest text-gray-950">LION SIMPLANNER</span>
               <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Instructor Portal</span>
@@ -247,8 +246,8 @@ export default function InstructorDashboard() {
                     key={s.sessionId}
                     onClick={() => setSelectedSession(s)}
                     className={`p-3 border rounded bg-white cursor-pointer transition-all ${selectedSession?.sessionId === s.sessionId
-                        ? 'border-brand-red shadow-sm'
-                        : 'border-gray-150 hover:border-gray-300'
+                      ? 'border-brand-red shadow-sm'
+                      : 'border-gray-150 hover:border-gray-300'
                       }`}
                   >
                     <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
@@ -256,10 +255,10 @@ export default function InstructorDashboard() {
                     <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
                       <span>{timeLabel} • {s.phase}</span>
                       <span className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${s.status === 'Completed'
-                          ? 'bg-green-50 text-green-600 border border-green-300'
-                          : s.status === 'Scheduled'
-                            ? 'bg-blue-50 text-blue-600 border border-blue-300'
-                            : 'bg-orange-50 text-orange-600 border border-orange-300'
+                        ? 'bg-green-50 text-green-600 border border-green-300'
+                        : s.status === 'Scheduled'
+                          ? 'bg-blue-50 text-blue-600 border border-blue-300'
+                          : 'bg-orange-50 text-orange-600 border border-orange-300'
                         }`}>
                         {s.status}
                       </span>
@@ -359,8 +358,8 @@ export default function InstructorDashboard() {
                                   height: `${height - 2}px`,
                                 }}
                                 className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all z-20 ${selectedSession?.sessionId === s.sessionId
-                                    ? 'bg-brand-red border border-red-800 font-black'
-                                    : 'bg-gray-400 hover:bg-gray-500 font-medium'
+                                  ? 'bg-brand-red border border-red-800 font-black'
+                                  : 'bg-gray-400 hover:bg-gray-500 font-medium'
                                   }`}
                               >
                                 <div className="min-w-0">
@@ -393,8 +392,16 @@ export default function InstructorDashboard() {
 
                 <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1">
                   <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Pilot</span>
-                    <span className="font-black text-gray-900">{selectedSession.pilotName}</span>
+                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Captain</span>
+                    <span className="font-black text-gray-900 truncate block">{selectedSession.captainName || (selectedSession.captainId ? selectedSession.captainId.substring(0, 8) : 'Unassigned')}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">First Officer</span>
+                    <span className="font-black text-gray-900 truncate block">{selectedSession.firstOfficerName || (selectedSession.firstOfficerId ? selectedSession.firstOfficerId.substring(0, 8) : 'Unassigned')}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Instructor</span>
+                    <span className="font-black text-gray-900 truncate block">{selectedSession.instructorName || (selectedSession.instructorId ? selectedSession.instructorId.substring(0, 8) : user.name)}</span>
                   </div>
                   <div>
                     <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Phase</span>
@@ -407,8 +414,8 @@ export default function InstructorDashboard() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Session ID</span>
-                    <span className="font-black text-gray-900">{selectedSession.sessionId.substring(0, 8)}</span>
+                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Trainee Code</span>
+                    <span className="font-black text-gray-900">{selectedSession.traineeEmployeeCode || 'N/A'}</span>
                   </div>
                 </div>
               </div>

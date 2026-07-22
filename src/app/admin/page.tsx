@@ -180,6 +180,7 @@ export default function AdminPage() {
   const [selectedSlot, setSelectedSlot] = useState<{ dayKey: string; hour: number } | null>(null);
   const [viewedSession, setViewedSession] = useState<SimulatorSession | null>(null);
   const [isRescheduleMode, setIsRescheduleMode] = useState(false);
+  const [editDateKey, setEditDateKey] = useState<string>('');
   const [editStartHour, setEditStartHour] = useState('08');
   const [editStartMin, setEditStartMin] = useState('00');
   const [editDuration, setEditDuration] = useState<number>(4);
@@ -465,6 +466,7 @@ export default function AdminPage() {
     const startMin = start.getMinutes().toString().padStart(2, '0');
     const end = getEndFromStartAndDuration(startHour, startMin, duration);
 
+    setEditDateKey(toLocalDateKey(start));
     setEditStartHour(startHour);
     setEditStartMin(startMin);
     setEditDuration(duration);
@@ -475,13 +477,10 @@ export default function AdminPage() {
   };
 
   const handleSaveReschedule = async () => {
-    if (!viewedSession) return;
-    const viewedStart = toLocalDate(viewedSession.startTime);
-    if (!viewedStart) return;
+    if (!viewedSession || !editDateKey) return;
 
-    const dayKey = toLocalDateKey(viewedStart);
-    const startTime = localDateFromKeyAndTime(dayKey, parseInt(editStartHour, 10), parseInt(editStartMin, 10)).toISOString();
-    const endTime = localDateFromKeyAndTime(dayKey, parseInt(editEndHour, 10), parseInt(editEndMin, 10)).toISOString();
+    const startTime = localDateFromKeyAndTime(editDateKey, parseInt(editStartHour, 10), parseInt(editStartMin, 10)).toISOString();
+    const endTime = localDateFromKeyAndTime(editDateKey, parseInt(editEndHour, 10), parseInt(editEndMin, 10)).toISOString();
 
     try {
       await rescheduleSession(viewedSession.sessionId, startTime, endTime);
@@ -1406,19 +1405,25 @@ export default function AdminPage() {
                       if (isRescheduleMode) {
                         return (
                           <div className="space-y-2 mt-1">
-                            <div className="text-gray-955 text-[10px] font-black uppercase tracking-wider truncate">
-                              {viewedStart.toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                            <div>
+                              <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Date</label>
+                              <input
+                                type="date"
+                                value={editDateKey}
+                                onChange={(e) => setEditDateKey(e.target.value)}
+                                className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                              />
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
-                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Start</label>
+                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Start Time</label>
                                 <div className="flex gap-1">
                                   <select
                                     value={editStartHour}
                                     onChange={(e) => handleEditStartTimeChange(e.target.value, editStartMin)}
                                     className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
                                   >
-                                    {['06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18'].map(hr => (
+                                    {['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'].map(hr => (
                                       <option key={hr} value={hr}>{hr}</option>
                                     ))}
                                   </select>
@@ -1447,7 +1452,7 @@ export default function AdminPage() {
                               </div>
                             </div>
                             <div className="text-[9px] text-gray-500 truncate">
-                              {editStartHour}:{editStartMin} - {editEndHour}:{editEndMin} Local
+                              {editDateKey ? editDateKey : 'No Date selected'} • {editStartHour}:{editStartMin} - {editEndHour}:{editEndMin} Local
                             </div>
                           </div>
                         );
