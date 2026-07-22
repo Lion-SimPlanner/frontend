@@ -54,8 +54,9 @@ export interface PilotPriority {
   employeeCode: string;
   fullName: string;
   rank: string;
+  isExternalUser: boolean;
   nextTrainingDue: string;
-  requiredSyllabus: string;
+  requiredSyllabus?: string;
   typeRatings: string[];
   medicalExpiry: string;
   lastDutyEndTime?: string;
@@ -129,8 +130,43 @@ export const getPilotsPriorityQueue = async (
   const params: Record<string, string> = {};
   if (syllabusFilter) params.syllabusFilter = syllabusFilter;
   if (typeRating) params.typeRating = typeRating;
-  const response = await apiClient.get<PilotPriority[]>('/api/personnel/pilots/priority-queue', { params });
-  return response.data;
+  const response = await apiClient.get<any[]>('/api/personnel/pilots/priority-queue', { params });
+  return response.data.map((p) => ({
+    pilotId: p.pilotId,
+    employeeCode: p.employeeCode,
+    fullName: p.fullName,
+    rank: p.rank,
+    isExternalUser: Boolean(p.isExternalUser),
+    nextTrainingDue: normalizeUtcIso(p.nextTrainingDue) ?? new Date().toISOString(),
+    requiredSyllabus: typeof p.requiredSyllabus === 'string' ? p.requiredSyllabus : undefined,
+    typeRatings: Array.isArray(p.typeRatings) ? p.typeRatings : [],
+    medicalExpiry: normalizeUtcIso(p.medicalExpiry) ?? new Date().toISOString(),
+    lastDutyEndTime: normalizeUtcIso(p.lastDutyEndTime),
+    nextDutyStartTime: normalizeUtcIso(p.nextDutyStartTime),
+  }));
+};
+
+export const createExternalPilot = async (req: {
+  fullName: string;
+  email?: string;
+  contactNumber?: string;
+  companyName?: string;
+}): Promise<PilotPriority> => {
+  const response = await apiClient.post('/api/pilots/external', req);
+  const p = response.data;
+  return {
+    pilotId: p.pilotId,
+    employeeCode: p.employeeCode,
+    fullName: p.fullName,
+    rank: p.rank,
+    isExternalUser: Boolean(p.isExternalUser),
+    nextTrainingDue: normalizeUtcIso(p.nextTrainingDue) ?? new Date().toISOString(),
+    requiredSyllabus: typeof p.requiredSyllabus === 'string' ? p.requiredSyllabus : undefined,
+    typeRatings: Array.isArray(p.typeRatings) ? p.typeRatings : [],
+    medicalExpiry: normalizeUtcIso(p.medicalExpiry) ?? new Date().toISOString(),
+    lastDutyEndTime: normalizeUtcIso(p.lastDutyEndTime),
+    nextDutyStartTime: normalizeUtcIso(p.nextDutyStartTime),
+  };
 };
 
 export const getInstructors = async (): Promise<Instructor[]> => {
@@ -212,7 +248,24 @@ export const createSession = async (req: {
   if (!normalizedStartTime || !normalizedEndTime) throw new Error('Invalid session datetime payload');
   sanitized.startTime = normalizedStartTime;
   sanitized.endTime = normalizedEndTime;
-  const response = await apiClient.post('/api/scheduling/sessions', sanitized);
+  const response = await apiClient.post('/api/sessions', sanitized);
+  return response.data;
+};
+
+export const rescheduleSession = async (
+  sessionId: string,
+  startTime: string,
+  endTime: string
+): Promise<{ sessionId: string; status: string; startTime: string; endTime: string }> => {
+  const valid = ensureUuid(sessionId);
+  if (!valid) throw new Error('Invalid session id');
+  const normalizedStart = normalizeUtcIso(startTime);
+  const normalizedEnd = normalizeUtcIso(endTime);
+  if (!normalizedStart || !normalizedEnd) throw new Error('Invalid reschedule datetime payload');
+  const response = await apiClient.put(`/api/sessions/${valid}`, {
+    startTime: normalizedStart,
+    endTime: normalizedEnd,
+  });
   return response.data;
 };
 

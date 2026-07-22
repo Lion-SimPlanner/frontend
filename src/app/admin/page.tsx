@@ -10,7 +10,9 @@ import {
   getSimulators,
   getSessions,
   createSession,
+  createExternalPilot,
   publishSession,
+  rescheduleSession,
   cancelSession,
   setSimulatorStatus,
   submitMaintenanceChecklist,
@@ -65,6 +67,24 @@ const toLocalDateKey = (value: Date) => {
 const localDateFromKeyAndTime = (dateKey: string, hour: number, minute: number) => {
   const [year, month, day] = dateKey.split('-').map((segment) => parseInt(segment, 10));
   return new Date(year, month - 1, day, hour, minute, 0, 0);
+};
+
+const getEndFromStartAndDuration = (hour: string, minute: string, duration: number) => {
+  const startDecimal = parseInt(hour, 10) + parseInt(minute, 10) / 60;
+  const endDecimal = startDecimal + duration;
+
+  let endHourNum = Math.floor(endDecimal);
+  let endMinNum = Math.round((endDecimal - endHourNum) * 60);
+
+  if (endHourNum >= 24) {
+    endHourNum = 23;
+    endMinNum = 59;
+  }
+
+  return {
+    endHour: endHourNum.toString().padStart(2, '0'),
+    endMinute: endMinNum.toString().padStart(2, '0'),
+  };
 };
 
 const formatCalendarRange = (startDate: Date, days: number) => {
@@ -159,6 +179,13 @@ export default function AdminPage() {
 
   const [selectedSlot, setSelectedSlot] = useState<{ dayKey: string; hour: number } | null>(null);
   const [viewedSession, setViewedSession] = useState<SimulatorSession | null>(null);
+  const [isRescheduleMode, setIsRescheduleMode] = useState(false);
+  const [editStartHour, setEditStartHour] = useState('08');
+  const [editStartMin, setEditStartMin] = useState('00');
+  const [editDuration, setEditDuration] = useState<number>(4);
+  const [editEndHour, setEditEndHour] = useState('12');
+  const [editEndMin, setEditEndMin] = useState('00');
+  const [rescheduleViolations, setRescheduleViolations] = useState<string[]>([]);
 
   const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
   const [sessionDateKey, setSessionDateKey] = useState<string>(() => toLocalDateKey(startOfLocalDay(new Date())));
@@ -186,6 +213,13 @@ export default function AdminPage() {
   const [maintSimId, setMaintSimId] = useState('');
   const [maintIsCleared, setMaintIsCleared] = useState(true);
   const [maintNotes, setMaintNotes] = useState('');
+
+  const [showExternalUserModal, setShowExternalUserModal] = useState(false);
+  const [externalFullName, setExternalFullName] = useState('');
+  const [externalEmail, setExternalEmail] = useState('');
+  const [externalContactNumber, setExternalContactNumber] = useState('');
+  const [externalCompanyName, setExternalCompanyName] = useState('');
+  const [externalUserError, setExternalUserError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'Dashboard' | 'Engineers' | 'Instructors'>('Dashboard');
   const [selectedHwSimId, setSelectedHwSimId] = useState<string>('');
@@ -316,6 +350,8 @@ export default function AdminPage() {
     if (isOccupied) return;
 
     setViewedSession(null);
+    setIsRescheduleMode(false);
+    setRescheduleViolations([]);
     setSelectedSlot({ dayKey, hour });
     setSessionDateKey(dayKey);
     setSessionStartHour(hour.toString().padStart(2, '0'));
@@ -333,45 +369,49 @@ export default function AdminPage() {
 
   const handleDurationChange = (duration: number) => {
     setSessionDuration(duration);
-    const startHourNum = parseInt(sessionStartHour);
-    const startMinNum = parseInt(sessionStartMin);
-    const startDecimal = startHourNum + startMinNum / 60;
-    const endDecimal = startDecimal + duration;
-
-    let endHourNum = Math.floor(endDecimal);
-    let endMinNum = Math.round((endDecimal - endHourNum) * 60);
-
-    if (endHourNum >= 24) {
-      endHourNum = 23;
-      endMinNum = 59;
-    }
-
-    setSessionEndHour(endHourNum.toString().padStart(2, '0'));
-    setSessionEndMin(endMinNum.toString().padStart(2, '0'));
+    const end = getEndFromStartAndDuration(sessionStartHour, sessionStartMin, duration);
+    setSessionEndHour(end.endHour);
+    setSessionEndMin(end.endMinute);
   };
 
   const handleStartTimeChange = (hour: string, minute: string) => {
     setSessionStartHour(hour);
     setSessionStartMin(minute);
-    
-    const duration = sessionDuration;
-    const startDecimal = parseInt(hour) + parseInt(minute) / 60;
-    const endDecimal = startDecimal + duration;
 
-    let endHourNum = Math.floor(endDecimal);
-    let endMinNum = Math.round((endDecimal - endHourNum) * 60);
+    const end = getEndFromStartAndDuration(hour, minute, sessionDuration);
+    setSessionEndHour(end.endHour);
+    setSessionEndMin(end.endMinute);
+  };
 
-    if (endHourNum >= 24) {
-      endHourNum = 23;
-      endMinNum = 59;
-    }
+  const handleEditDurationChange = (duration: number) => {
+    setEditDuration(duration);
+    const end = getEndFromStartAndDuration(editStartHour, editStartMin, duration);
+    setEditEndHour(end.endHour);
+    setEditEndMin(end.endMinute);
+  };
 
-    setSessionEndHour(endHourNum.toString().padStart(2, '0'));
-    setSessionEndMin(endMinNum.toString().padStart(2, '0'));
+  const handleEditStartTimeChange = (hour: string, minute: string) => {
+    setEditStartHour(hour);
+    setEditStartMin(minute);
+    const end = getEndFromStartAndDuration(hour, minute, editDuration);
+    setEditEndHour(end.endHour);
+    setEditEndMin(end.endMinute);
   };
 
   const handle遊Crew = (p: PilotPriority) => {
     if (!selectedSlot) return;
+    if (p.isExternalUser) {
+      if (!assignedCaptain) {
+        setAssignedCaptain(p);
+        return;
+      }
+      if (!assignedFO && selectedSessionType !== 'SinglePilotCRM') {
+        setAssignedFO(p);
+        return;
+      }
+      setAssignedCaptain(p);
+      return;
+    }
     if (p.rank === 'Captain') {
       setAssignedCaptain(p);
     } else {
@@ -382,6 +422,85 @@ export default function AdminPage() {
   const handleAssignInstructor = (i: Instructor) => {
     if (!selectedSlot) return;
     setAssignedInstructor(i);
+  };
+
+  const handleAddExternalUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setExternalUserError(null);
+
+    if (!externalFullName.trim()) {
+      setExternalUserError('Full name is required.');
+      return;
+    }
+
+    try {
+      const created = await createExternalPilot({
+        fullName: externalFullName.trim(),
+        email: externalEmail.trim() || undefined,
+        contactNumber: externalContactNumber.trim() || undefined,
+        companyName: externalCompanyName.trim() || undefined,
+      });
+
+      setPilots((prev) => [created, ...prev.filter((p) => p.pilotId !== created.pilotId)]);
+      setShowExternalUserModal(false);
+      setExternalFullName('');
+      setExternalEmail('');
+      setExternalContactNumber('');
+      setExternalCompanyName('');
+    } catch (err: any) {
+      if (err.response?.data?.error) {
+        setExternalUserError(err.response.data.error);
+      } else {
+        setExternalUserError('Failed to add external user.');
+      }
+    }
+  };
+
+  const handleStartReschedule = () => {
+    if (!viewedSession) return;
+    const start = toLocalDate(viewedSession.startTime);
+    if (!start) return;
+    const duration = getDurationInHours(viewedSession.startTime, viewedSession.endTime);
+    const startHour = start.getHours().toString().padStart(2, '0');
+    const startMin = start.getMinutes().toString().padStart(2, '0');
+    const end = getEndFromStartAndDuration(startHour, startMin, duration);
+
+    setEditStartHour(startHour);
+    setEditStartMin(startMin);
+    setEditDuration(duration);
+    setEditEndHour(end.endHour);
+    setEditEndMin(end.endMinute);
+    setRescheduleViolations([]);
+    setIsRescheduleMode(true);
+  };
+
+  const handleSaveReschedule = async () => {
+    if (!viewedSession) return;
+    const viewedStart = toLocalDate(viewedSession.startTime);
+    if (!viewedStart) return;
+
+    const dayKey = toLocalDateKey(viewedStart);
+    const startTime = localDateFromKeyAndTime(dayKey, parseInt(editStartHour, 10), parseInt(editStartMin, 10)).toISOString();
+    const endTime = localDateFromKeyAndTime(dayKey, parseInt(editEndHour, 10), parseInt(editEndMin, 10)).toISOString();
+
+    try {
+      await rescheduleSession(viewedSession.sessionId, startTime, endTime);
+      const updatedSession: SimulatorSession = {
+        ...viewedSession,
+        startTime,
+        endTime,
+      };
+      setSessions((prev) => prev.map((s) => s.sessionId === viewedSession.sessionId ? updatedSession : s));
+      setViewedSession(updatedSession);
+      setIsRescheduleMode(false);
+      setRescheduleViolations([]);
+    } catch (err: any) {
+      if (err.response?.data?.violations) {
+        setRescheduleViolations(err.response.data.violations);
+      } else {
+        setRescheduleViolations(['Failed to reschedule session.']);
+      }
+    }
   };
 
   const handlePublish = async () => {
@@ -465,6 +584,8 @@ export default function AdminPage() {
       try {
         await cancelSession(id, 'Cancelled via operations panel');
         setViewedSession(null);
+        setIsRescheduleMode(false);
+        setRescheduleViolations([]);
         await loadData();
       } catch (err) {
         console.error(err);
@@ -477,7 +598,7 @@ export default function AdminPage() {
     if (!aogSimId) return;
 
     try {
-      await setSimulatorStatus(aogSimId, 'Down', aogFault);
+      await setSimulatorStatus(aogSimId, 'AOG', aogFault);
       setShowAogModal(false);
       setAogFault('');
       await loadData();
@@ -488,7 +609,7 @@ export default function AdminPage() {
 
   const handleClearAog = async (simId: string) => {
     try {
-      await setSimulatorStatus(simId, 'Up');
+      await setSimulatorStatus(simId, 'Ready');
       await loadData();
     } catch (err) {
       console.error(err);
@@ -538,18 +659,24 @@ export default function AdminPage() {
     setCalendarStartDate((prev) => addLocalDays(prev, -visibleDayCount));
     setSelectedSlot(null);
     setViewedSession(null);
+    setIsRescheduleMode(false);
+    setRescheduleViolations([]);
   };
 
   const goToNextWindow = () => {
     setCalendarStartDate((prev) => addLocalDays(prev, visibleDayCount));
     setSelectedSlot(null);
     setViewedSession(null);
+    setIsRescheduleMode(false);
+    setRescheduleViolations([]);
   };
 
   const goToTodayWindow = () => {
     setCalendarStartDate(startOfLocalDay(new Date()));
     setSelectedSlot(null);
     setViewedSession(null);
+    setIsRescheduleMode(false);
+    setRescheduleViolations([]);
   };
 
   const referenceSessionStartIso = selectedSlot
@@ -827,6 +954,16 @@ export default function AdminPage() {
                 </span>
               </div>
 
+              <button
+                onClick={() => {
+                  setExternalUserError(null);
+                  setShowExternalUserModal(true);
+                }}
+                className="w-full mb-3 bg-brand-red hover:bg-red-700 text-white text-[9px] font-black uppercase tracking-wider py-2 rounded cursor-pointer"
+              >
+                + Add External User
+              </button>
+
               <div className="space-y-3 mb-4">
                 <input
                   type="text"
@@ -871,7 +1008,14 @@ export default function AdminPage() {
                           {p.fullName.split(' ').map(n => n[0]).join('')}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-black text-gray-900 truncate">{p.fullName}</div>
+                          <div className="text-xs font-black text-gray-900 truncate flex items-center gap-1.5">
+                            <span className="truncate">{p.fullName}</span>
+                            {p.isExternalUser && (
+                              <span className="shrink-0 text-[8px] font-black uppercase px-1 py-0.5 rounded border border-orange-400 bg-orange-50 text-orange-700 leading-none">
+                                EXT
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[9px] text-gray-400 uppercase flex flex-wrap items-center gap-1.5 mt-0.5 min-w-0">
                             <span className="truncate">{p.rank}</span>
                             <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none shrink-0 ${expiryColorClass}`}>
@@ -1177,6 +1321,8 @@ export default function AdminPage() {
                                         e.stopPropagation();
                                         setSelectedSlot(null);
                                         setViewedSession(s);
+                                        setIsRescheduleMode(false);
+                                        setRescheduleViolations([]);
                                       }}
                                       className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 ${
                                         isSpecial
@@ -1218,16 +1364,29 @@ export default function AdminPage() {
                       Session Details
                     </h3>
                     <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
-                      Scheduled • Read-Only
+                      {viewedSession.status} {isRescheduleMode ? '• Edit Mode' : '• Read-Only'}
                     </p>
                   </div>
                   <button
-                    onClick={() => setViewedSession(null)}
+                    onClick={() => {
+                      setViewedSession(null);
+                      setIsRescheduleMode(false);
+                      setRescheduleViolations([]);
+                    }}
                     className="text-xs font-black uppercase text-gray-400 hover:text-brand-red cursor-pointer shrink-0"
                   >
                     Close
                   </button>
                 </div>
+
+                {viewedSession.status === 'Scheduled' && !isRescheduleMode && (
+                  <button
+                    onClick={handleStartReschedule}
+                    className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
+                  >
+                    Edit / Reschedule
+                  </button>
+                )}
 
                 <div className="space-y-3.5 text-xs font-bold text-gray-700 min-w-0">
                   <div className="min-w-0">
@@ -1243,6 +1402,57 @@ export default function AdminPage() {
                       if (!viewedStart || !viewedEnd) {
                         return <span className="text-gray-955">N/A</span>;
                       }
+
+                      if (isRescheduleMode) {
+                        return (
+                          <div className="space-y-2 mt-1">
+                            <div className="text-gray-955 text-[10px] font-black uppercase tracking-wider truncate">
+                              {viewedStart.toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Start</label>
+                                <div className="flex gap-1">
+                                  <select
+                                    value={editStartHour}
+                                    onChange={(e) => handleEditStartTimeChange(e.target.value, editStartMin)}
+                                    className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                                  >
+                                    {['06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18'].map(hr => (
+                                      <option key={hr} value={hr}>{hr}</option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    value={editStartMin}
+                                    onChange={(e) => handleEditStartTimeChange(editStartHour, e.target.value)}
+                                    className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                                  >
+                                    {['00', '15', '30', '45'].map(min => (
+                                      <option key={min} value={min}>{min}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Duration</label>
+                                <select
+                                  value={editDuration}
+                                  onChange={(e) => handleEditDurationChange(parseFloat(e.target.value))}
+                                  className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                                >
+                                  {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(h => (
+                                    <option key={h} value={h}>{h} {h === 1 ? 'Hr' : 'Hrs'}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="text-[9px] text-gray-500 truncate">
+                              {editStartHour}:{editStartMin} - {editEndHour}:{editEndMin} Local
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div className="min-w-0">
                           <span className="text-gray-955 block truncate">
@@ -1306,6 +1516,37 @@ export default function AdminPage() {
                     </div>
                   </div>
                 </div>
+
+                {isRescheduleMode && (
+                  <div className="space-y-3">
+                    {rescheduleViolations.length > 0 && (
+                      <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold max-w-full overflow-hidden">
+                        <ul className="list-disc list-inside space-y-0.5 break-words">
+                          {rescheduleViolations.map((v, idx) => (
+                            <li key={idx} className="leading-tight">{v}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          setIsRescheduleMode(false);
+                          setRescheduleViolations([]);
+                        }}
+                        className="w-full border border-gray-200 hover:bg-gray-50 text-gray-700 font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
+                      >
+                        Cancel Edit
+                      </button>
+                      <button
+                        onClick={handleSaveReschedule}
+                        className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {user.role === 'Admin' && (
                   <button
@@ -1498,6 +1739,80 @@ export default function AdminPage() {
                 </p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {showExternalUserModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
+            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+              Add External User
+            </h3>
+            <form onSubmit={handleAddExternalUser} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Full Name
+                </label>
+                <input
+                  required
+                  value={externalFullName}
+                  onChange={(e) => setExternalFullName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Contact Email
+                </label>
+                <input
+                  type="email"
+                  value={externalEmail}
+                  onChange={(e) => setExternalEmail(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Contact Number
+                </label>
+                <input
+                  value={externalContactNumber}
+                  onChange={(e) => setExternalContactNumber(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Company Name
+                </label>
+                <input
+                  value={externalCompanyName}
+                  onChange={(e) => setExternalCompanyName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
+                />
+              </div>
+              {externalUserError && (
+                <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold break-words">
+                  {externalUserError}
+                </div>
+              )}
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowExternalUserModal(false)}
+                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer"
+                >
+                  Add User
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
