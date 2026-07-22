@@ -103,9 +103,11 @@ export interface SimulatorSession {
   sessionId: string;
   simulatorId: string;
   sessionType: string;
-  status: 'Draft' | 'Scheduled' | 'InProgress' | 'Completed' | 'Cancelled';
+  status: 'Draft' | 'Scheduled' | 'InProgress' | 'Completed' | 'Cancelled' | 'TerminatedEarly';
   startTime: string;
   endTime: string;
+  originalEndTime?: string;
+  terminationReason?: string;
   captainId?: string;
   captainName?: string;
   firstOfficerId?: string;
@@ -281,6 +283,13 @@ export const publishSession = async (
   return response.data;
 };
 
+export const startSession = async (id: string): Promise<SimulatorSession> => {
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid session id');
+  const response = await apiClient.patch(`/api/sessions/${valid}/start`);
+  return response.data;
+};
+
 export const cancelSession = async (
   id: string,
   reason: string
@@ -288,6 +297,32 @@ export const cancelSession = async (
   const valid = ensureUuid(id);
   if (!valid) throw new Error('Invalid session id');
   const response = await apiClient.put(`/api/scheduling/sessions/${valid}/cancel`, { reason });
+  return response.data;
+};
+
+export const terminateSessionEarly = async (
+  id: string,
+  actualEndTime: string,
+  reason: string
+): Promise<SimulatorSession> => {
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid session id');
+  const normalizedActualEnd = normalizeUtcIso(actualEndTime);
+  if (!normalizedActualEnd) throw new Error('Invalid actual end time payload');
+  const response = await apiClient.patch(`/api/sessions/${valid}/terminate-early`, {
+    actualEndTime: normalizedActualEnd,
+    reason,
+  });
+  return response.data;
+};
+
+export const completeGrading = async (
+  id: string,
+  req: { gradeStatus: string; instructorNotes: string; traineeEmployeeCode: string }
+): Promise<{ sessionId: string; status: string; cmsSyncTriggered: boolean }> => {
+  const valid = ensureUuid(id);
+  if (!valid) throw new Error('Invalid session id');
+  const response = await apiClient.post(`/api/sessions/${valid}/grades`, req);
   return response.data;
 };
 

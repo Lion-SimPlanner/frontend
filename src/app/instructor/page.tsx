@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { getSessions, publishSession, SimulatorSession } from '@/services/api';
+import { getSessions, publishSession, completeGrading, terminateSessionEarly, startSession, SimulatorSession } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 
 interface ExtendedSession extends SimulatorSession {
@@ -50,6 +50,41 @@ const getSessionDurationHours = (start?: string, end?: string) => {
   return Math.max(0.5, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
 };
 
+const getStatusBadgeStyle = (status: string) => {
+  switch (status) {
+    case 'InProgress':
+      return {
+        badge: 'bg-amber-50 text-amber-700 border-amber-400 animate-pulse',
+        label: 'IN PROGRESS',
+      };
+    case 'Completed':
+      return {
+        badge: 'bg-green-50 text-green-700 border-green-400',
+        label: 'COMPLETED',
+      };
+    case 'TerminatedEarly':
+      return {
+        badge: 'bg-purple-50 text-purple-700 border-purple-400',
+        label: 'TERMINATED EARLY',
+      };
+    case 'Cancelled':
+      return {
+        badge: 'bg-red-50 text-brand-red border-brand-red',
+        label: 'CANCELLED',
+      };
+    case 'Scheduled':
+      return {
+        badge: 'bg-blue-50 text-blue-700 border-blue-400',
+        label: 'SCHEDULED',
+      };
+    default:
+      return {
+        badge: 'bg-gray-50 text-gray-700 border-gray-300',
+        label: status.toUpperCase(),
+      };
+  }
+};
+
 export default function InstructorDashboard() {
   const { user, logout, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -64,6 +99,12 @@ export default function InstructorDashboard() {
   const [sopAdherence, setSopAdherence] = useState('');
   const [overallGrade, setOverallGrade] = useState('');
   const [notes, setNotes] = useState('');
+
+  const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [terminateReason, setTerminateReason] = useState('Simulator AOG');
+  const [terminateActualEndHour, setTerminateActualEndHour] = useState('10');
+  const [terminateActualEndMin, setTerminateActualEndMin] = useState('00');
+  const [terminateError, setTerminateError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -109,8 +150,8 @@ export default function InstructorDashboard() {
       const rawSessions = await getSessions();
       const mapped: ExtendedSession[] = rawSessions.map((s) => {
         const syllabusLabel = s.syllabusId
-          .replace(/([A-Z])/g, ' $1')
-          .trim();
+          ? s.syllabusId.replace(/([A-Z])/g, ' $1').trim()
+          : 'Simulator Session';
         const startHour = new Date(s.startTime).getHours();
         const phase =
           startHour < 9 ? 'Phase 1' :
@@ -143,16 +184,70 @@ export default function InstructorDashboard() {
     }
   };
 
+  const handleStartSession = async () => {
+    if (!selectedSession) return;
+    try {
+      const updated = await startSession(selectedSession.sessionId);
+      setSelectedSession(prev => prev ? { ...prev, status: 'InProgress' } : null);
+      setSessions(prev => prev.map(s => s.sessionId === selectedSession.sessionId ? { ...s, status: 'InProgress' } : s));
+      alert(`Session ${selectedSession.title} started! Status is now IN PROGRESS.`);
+    } catch (err: any) {
+      console.error('[Instructor] Failed to start session:', err);
+      alert(err?.response?.data?.message || err?.response?.data?.error || 'Failed to start session.');
+    }
+  };
+
   const handleSubmitSyllabus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSession) return;
 
     try {
-      alert(`Syllabus submitted for ${selectedSession.title}.\nGrade: ${overallGrade}\nNotes: ${notes}\nSyncing with external CMS database...`);
-      setSelectedSession(prev => prev ? { ...prev, status: 'Completed' } : null);
-      setSessions(prev => prev.map(s => s.sessionId === selectedSession.sessionId ? { ...s, status: 'Completed' } : s));
-    } catch (err) {
-      console.error(err);
+      await completeGrading(selectedSession.sessionId, {
+        gradeStatus: overallGrade || 'PASSED',
+        instructorNotes: notes,
+        traineeEmployeeCode: selectedSession.traineeEmployeeCode || 'LGA-001',
+      });
+      setSelectedSession(prev => prev ? { ...prev, status: 'Completed', isGraded: true, gradeStatus: overallGrade || 'PASSED', instructorNotes: notes } : null);
+      setSessions(prev => prev.map(s => s.sessionId === selectedSession.sessionId ? { ...s, status: 'Completed', isGraded: true, gradeStatus: overallGrade || 'PASSED', instructorNotes: notes } : s));
+      alert(`Syllabus grading submitted successfully for ${selectedSession.title}. Session marked as COMPLETED.`);
+    } catch (err: any) {
+      console.error('[Instructor] Failed to submit grading:', err);
+      alert(err?.response?.data?.error || 'Failed to submit grading.');
+    }
+  };
+
+  const handleOpenTerminateModal = () => {
+    if (!selectedSession) return;
+    const now = new Date();
+    setTerminateActualEndHour(now.getHours().toString().padStart(2, '0'));
+    setTerminateActualEndMin(now.getMinutes().toString().padStart(2, '0'));
+    setTerminateReason('Simulator AOG');
+    setTerminateError(null);
+    setShowTerminateModal(true);
+  };
+
+  const handleConfirmTerminateEarly = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSession) return;
+
+    const start = toLocalDate(selectedSession.startTime);
+    if (!start) return;
+
+    const actualEndDate = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate(),
+      parseInt(terminateActualEndHour, 10),
+      parseInt(terminateActualEndMin, 10)
+    );
+
+    try {
+      await terminateSessionEarly(selectedSession.sessionId, actualEndDate.toISOString(), terminateReason);
+      setShowTerminateModal(false);
+      await loadData();
+      alert(`Session ${selectedSession.title} terminated early. Schedule updated.`);
+    } catch (err: any) {
+      setTerminateError(err.response?.data?.message || 'Failed to terminate session early.');
     }
   };
 
@@ -199,7 +294,7 @@ export default function InstructorDashboard() {
 
         <div className="flex items-center gap-4">
           <div className="hidden md:flex flex-col text-right">
-            <span className="text-xs font-black text-gray-950 uppercase leading-none">{user.name}</span>
+            <span className="text-xs font-black text-gray-955 uppercase leading-none">{user.name}</span>
             <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Type Rating Instructor • TRI/TRE</span>
           </div>
           <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0">
@@ -218,7 +313,7 @@ export default function InstructorDashboard() {
           <div className="grid grid-cols-3 gap-2">
             <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Window</span>
-              <span className="text-lg font-black text-gray-950 mt-1 block">{visibleCount}</span>
+              <span className="text-lg font-black text-gray-955 mt-1 block">{visibleCount}</span>
             </div>
             <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Pending</span>
@@ -240,6 +335,7 @@ export default function InstructorDashboard() {
                 const timeLabel = localStart
                   ? localStart.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
                   : 'N/A';
+                const style = getStatusBadgeStyle(s.status);
 
                 return (
                   <div
@@ -254,13 +350,8 @@ export default function InstructorDashboard() {
                     <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
                     <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
                       <span>{timeLabel} • {s.phase}</span>
-                      <span className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${s.status === 'Completed'
-                        ? 'bg-green-50 text-green-600 border border-green-300'
-                        : s.status === 'Scheduled'
-                          ? 'bg-blue-50 text-blue-600 border border-blue-300'
-                          : 'bg-orange-50 text-orange-600 border border-orange-300'
-                        }`}>
-                        {s.status}
+                      <span className={`px-1.5 py-0.5 rounded border leading-none font-bold ${style.badge}`}>
+                        {style.label}
                       </span>
                     </div>
                   </div>
@@ -359,14 +450,16 @@ export default function InstructorDashboard() {
                                 }}
                                 className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all z-20 ${selectedSession?.sessionId === s.sessionId
                                   ? 'bg-brand-red border border-red-800 font-black'
-                                  : 'bg-gray-400 hover:bg-gray-500 font-medium'
+                                  : s.status === 'TerminatedEarly'
+                                    ? 'bg-purple-600 border border-purple-800 font-bold'
+                                    : 'bg-gray-400 hover:bg-gray-500 font-medium'
                                   }`}
                               >
                                 <div className="min-w-0">
                                   <div className="text-[7.5px] font-black uppercase tracking-wider truncate leading-tight">{s.title}</div>
                                   <div className="text-[7px] opacity-90 truncate font-bold mt-0.5">{s.pilotName}</div>
                                 </div>
-                                <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase}</span>
+                                <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase} • {s.status}</span>
                               </div>
                             );
                           })}
@@ -384,11 +477,39 @@ export default function InstructorDashboard() {
           {selectedSession ? (
             <form onSubmit={handleSubmitSyllabus} className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
               <div className="space-y-4 border-b border-gray-100 pb-4">
-                <span className="bg-brand-red text-white text-[8px] font-black px-2 py-0.5 rounded uppercase">
-                  {selectedSession.status}
-                </span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase ${getStatusBadgeStyle(selectedSession.status).badge}`}>
+                    {getStatusBadgeStyle(selectedSession.status).label}
+                  </span>
+                  {(selectedSession.status === 'InProgress' || selectedSession.status === 'Scheduled') && (
+                    <button
+                      type="button"
+                      onClick={handleOpenTerminateModal}
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                    >
+                      Terminate Early
+                    </button>
+                  )}
+                </div>
+
+                {selectedSession.status === 'Scheduled' && (
+                  <button
+                    type="button"
+                    onClick={handleStartSession}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 px-3 rounded text-[10px] uppercase tracking-wider transition-colors cursor-pointer shadow-sm"
+                  >
+                    Start Session
+                  </button>
+                )}
+
                 <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1">{selectedSession.title}</h3>
                 <div className="text-[9px] text-gray-400 font-bold uppercase">{toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}</div>
+
+                {selectedSession.terminationReason && (
+                  <div className="p-2 bg-purple-50 border border-purple-200 text-purple-800 rounded text-[9px] font-bold">
+                    Termination Reason: {selectedSession.terminationReason}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1">
                   <div>
@@ -429,95 +550,106 @@ export default function InstructorDashboard() {
                 </div>
                 <p className="text-[9px] text-gray-455 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Technical Skills</label>
-                    <select
-                      value={techSkills}
-                      onChange={(e) => setTechSkills(e.target.value)}
-                      className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red"
-                    >
-                      <option value="">—</option>
-                      <option value="5">5 - Excellent</option>
-                      <option value="4">4 - Good</option>
-                      <option value="3">3 - Satisfactory</option>
-                      <option value="2">2 - Weak</option>
-                      <option value="1">1 - Unsatisfactory</option>
-                    </select>
+                {selectedSession.status !== 'InProgress' && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[9px] font-bold text-amber-800 flex items-center gap-2">
+                    <span className="text-xs">🔒</span>
+                    <span>Grading is locked. Start session to record grades.</span>
+                  </div>
+                )}
+
+                <fieldset disabled={selectedSession.status !== 'InProgress'} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Technical Skills</label>
+                      <select
+                        value={techSkills}
+                        onChange={(e) => setTechSkills(e.target.value)}
+                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">—</option>
+                        <option value="5">5 - Excellent</option>
+                        <option value="4">4 - Good</option>
+                        <option value="3">3 - Satisfactory</option>
+                        <option value="2">2 - Weak</option>
+                        <option value="1">1 - Unsatisfactory</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">CRM / Teamwork</label>
+                      <select
+                        value={crmTeamwork}
+                        onChange={(e) => setCrmTeamwork(e.target.value)}
+                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">—</option>
+                        <option value="5">5 - Excellent</option>
+                        <option value="4">4 - Good</option>
+                        <option value="3">3 - Satisfactory</option>
+                        <option value="2">2 - Weak</option>
+                        <option value="1">1 - Unsatisfactory</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">SOP Adherence</label>
+                      <select
+                        value={sopAdherence}
+                        onChange={(e) => setSopAdherence(e.target.value)}
+                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">—</option>
+                        <option value="5">5 - Excellent</option>
+                        <option value="4">4 - Good</option>
+                        <option value="3">3 - Satisfactory</option>
+                        <option value="2">2 - Weak</option>
+                        <option value="1">1 - Unsatisfactory</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Overall Grade</label>
+                      <select
+                        value={overallGrade}
+                        onChange={(e) => setOverallGrade(e.target.value)}
+                        required={selectedSession.status === 'InProgress'}
+                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
+                      >
+                        <option value="">—</option>
+                        <option value="PASSED">PASSED</option>
+                        <option value="FAILED">FAILED</option>
+                        <option value="SATISFACTORY">SATISFACTORY</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>
-                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">CRM / Teamwork</label>
-                    <select
-                      value={crmTeamwork}
-                      onChange={(e) => setCrmTeamwork(e.target.value)}
-                      className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red"
-                    >
-                      <option value="">—</option>
-                      <option value="5">5 - Excellent</option>
-                      <option value="4">4 - Good</option>
-                      <option value="3">3 - Satisfactory</option>
-                      <option value="2">2 - Weak</option>
-                      <option value="1">1 - Unsatisfactory</option>
-                    </select>
+                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Input Teaching Material / Syllabus Notes</label>
+                    <textarea
+                      rows={4}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      required={selectedSession.status === 'InProgress'}
+                      placeholder="Document syllabus coverage, deviations, and instructor recommendations..."
+                      className="w-full text-xs font-bold text-gray-900 p-2.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red resize-none disabled:bg-gray-100 disabled:text-gray-400"
+                    />
                   </div>
-
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">SOP Adherence</label>
-                    <select
-                      value={sopAdherence}
-                      onChange={(e) => setSopAdherence(e.target.value)}
-                      className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red"
-                    >
-                      <option value="">—</option>
-                      <option value="5">5 - Excellent</option>
-                      <option value="4">4 - Good</option>
-                      <option value="3">3 - Satisfactory</option>
-                      <option value="2">2 - Weak</option>
-                      <option value="1">1 - Unsatisfactory</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Overall Grade</label>
-                    <select
-                      value={overallGrade}
-                      onChange={(e) => setOverallGrade(e.target.value)}
-                      required
-                      className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red"
-                    >
-                      <option value="">—</option>
-                      <option value="Excellent">Excellent</option>
-                      <option value="Satisfactory">Satisfactory</option>
-                      <option value="Unsatisfactory">Unsatisfactory</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Input Teaching Material / Syllabus Notes</label>
-                  <textarea
-                    rows={4}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    required
-                    placeholder="Document syllabus coverage, deviations, and instructor recommendations..."
-                    className="w-full text-xs font-bold text-gray-900 p-2.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red resize-none"
-                  />
-                </div>
+                </fieldset>
               </div>
 
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
+                  disabled={selectedSession.status !== 'InProgress'}
                   onClick={() => alert('Draft saved successfully.')}
-                  className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none cursor-pointer"
+                  className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Save Draft
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer"
+                  disabled={selectedSession.status !== 'InProgress'}
+                  className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Submit Syllabus
                 </button>
@@ -530,6 +662,96 @@ export default function InstructorDashboard() {
           )}
         </aside>
       </div>
+
+      {showTerminateModal && selectedSession && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full border border-gray-200 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
+                Terminate Session Early
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowTerminateModal(false)}
+                className="text-xs font-black text-gray-400 hover:text-brand-red uppercase"
+              >
+                Cancel
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1">
+              <span className="font-black uppercase block text-amber-900">Warning</span>
+              <p>This will log the completed hours and instantly release the remaining schedule block.</p>
+            </div>
+
+            <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
+              <div>
+                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                  Actual End Time
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={terminateActualEndHour}
+                    onChange={(e) => setTerminateActualEndHour(e.target.value)}
+                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                  >
+                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
+                      <option key={hr} value={hr}>{hr}:00</option>
+                    ))}
+                  </select>
+                  <select
+                    value={terminateActualEndMin}
+                    onChange={(e) => setTerminateActualEndMin(e.target.value)}
+                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                  >
+                    {['00', '15', '30', '45'].map((min) => (
+                      <option key={min} value={min}>{min} min</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                  Termination Reason
+                </label>
+                <select
+                  value={terminateReason}
+                  onChange={(e) => setTerminateReason(e.target.value)}
+                  className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red"
+                >
+                  <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
+                  <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
+                  <option value="Operational Emergency">Operational Emergency</option>
+                  <option value="Weather / Environmental">Weather / Facility Failure</option>
+                </select>
+              </div>
+
+              {terminateError && (
+                <div className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded">
+                  {terminateError}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTerminateModal(false)}
+                  className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-colors"
+                >
+                  Confirm Termination
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
