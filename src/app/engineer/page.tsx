@@ -3,10 +3,55 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { getSimulators, setSimulatorStatus, submitMaintenanceChecklist, getEngineers, getSessions, resolveDefect, checkoutEngineerShift, Simulator, Engineer, SimulatorSession } from '@/services/api';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import {
+  getSimulators,
+  setSimulatorStatus,
+  submitMaintenanceChecklist,
+  getEngineers,
+  getSessions,
+  resolveDefect,
+  checkoutEngineerShift,
+  Simulator,
+  Engineer,
+  SimulatorSession
+} from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 import ResolveDefectModal from '@/components/engineer/ResolveDefectModal';
 
+// --- Framer Motion Variants ---
+const listContainer: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 }
+  }
+};
+
+const listItem: Variants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } }
+};
+
+const modalBackdrop: Variants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.2 } },
+  exit: { opacity: 0, transition: { duration: 0.15 } }
+};
+
+const modalContent: Variants = {
+  hidden: { opacity: 0, scale: 0.95, y: 10 },
+  show: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, scale: 0.95, y: 10, transition: { duration: 0.15 } }
+};
+
+const slideInTop: Variants = {
+  hidden: { opacity: 0, y: -20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, y: -20, transition: { duration: 0.15 } }
+};
+
+// --- Utilities ---
 const toLocalDate = (value?: string) => {
   if (!value) return null;
   const dt = new Date(value);
@@ -291,9 +336,14 @@ export default function EngineerDashboard() {
   if (authLoading || !user || !mounted || loading || !currentTime) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-sm font-bold uppercase tracking-widest text-brand-red animate-pulse">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+          className="text-sm font-bold uppercase tracking-widest text-brand-red"
+        >
           Loading Engineering Portal...
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -343,48 +393,81 @@ export default function EngineerDashboard() {
     year: 'numeric'
   });
 
+  // Mock Shift Log for Stagger Animation
+  const mockShiftLog = [
+    { time: '06:00', iconColor: 'bg-gray-400', text: 'Shift handover received from Night Eng. R. Yamada' },
+    { time: '06:15', iconColor: 'bg-green-500', text: 'Motion platform pre-flight check — PASSED (all 6 axes nominal)' },
+    { time: '07:30', iconColor: 'bg-green-500', text: 'Visual system calibration completed — 3-channel alignment verified' },
+    { time: '09:12', iconColor: 'bg-orange-500', text: 'FMS / Avionics Bus — B737 FMC comms fault detected. Investigating.' },
+    { time: '09:45', iconColor: 'bg-orange-500', text: 'CH-2 VHF dropout logged. Intermittent — monitoring.' },
+    { time: '11:00', iconColor: 'bg-gray-400', text: 'Instructor briefing support — SIM-01 session Type Rating (Capt. Holt)' },
+    { time: '12:30', iconColor: 'bg-green-500', text: 'Hydraulic system pressure check — 3000 psi nominal' }
+  ];
+
+  // Hardware components mapped for animation
+  const hardwareComponents = [
+    { label: 'Motion Platform', value: '99.2%', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'Visual System', value: '120 Hz', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'Image Generators', value: '74 °C', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'Comms / Audio', value: 'DEGRADED', statusClass: 'text-orange-500', dotClass: 'bg-orange-500' },
+    { label: 'Hydraulic Power', value: '3000 psi', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'Thermal / HVAC', value: '21.4 °C', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'Data Recorder', value: '2.1 TB', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
+    { label: 'FMS / Avionics Bus', value: 'ERR', statusClass: 'text-brand-red', dotClass: 'bg-brand-red' }
+  ];
+
   return (
     <div className="h-screen flex bg-white text-gray-900 overflow-hidden font-sans">
-      <aside className="w-64 border-r border-gray-200 bg-white flex flex-col justify-between p-4 shrink-0">
+      <aside className="w-64 border-r border-gray-200 bg-white flex flex-col justify-between p-4 shrink-0 shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
         <div className="space-y-6">
           <div className="flex items-center gap-3">
-            <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain" />
-            <div className="flex flex-col">
-              <span className="text-xs font-black tracking-widest text-gray-950">LION SIMPLANNER</span>
-              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Engineering</span>
+            <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-black tracking-widest text-gray-950 truncate">LION SIMPLANNER</span>
+              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider truncate">Engineering</span>
             </div>
           </div>
 
-          <div className="p-3 bg-red-50 border border-brand-red rounded">
+          <motion.div
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="p-3 bg-red-50 border border-brand-red rounded shadow-sm hover:shadow-md transition-shadow"
+          >
             <span className="text-[9px] font-black text-brand-red uppercase tracking-wider block">Engineer Portal</span>
-            <span className="text-xs font-bold text-gray-900 mt-1 block">{currentSimulator ? `${currentSimulator.name}` : 'No simulator loaded'}</span>
-          </div>
+            <span className="text-xs font-bold text-gray-900 mt-1 block truncate">{currentSimulator ? `${currentSimulator.name}` : 'No simulator loaded'}</span>
+          </motion.div>
 
           <nav className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white">
+            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white transition-all active:scale-95 shadow-sm">
               Overview
             </button>
           </nav>
         </div>
 
         <div className="space-y-4">
-          <div className="p-3 bg-red-50 border border-brand-red rounded text-[10px] space-y-1">
-            <div className="font-black text-brand-red uppercase">Active Alerts</div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 bg-red-50 border border-brand-red rounded text-[10px] space-y-1 shadow-sm"
+          >
+            <div className="font-black text-brand-red uppercase flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-pulse" /> Active Alerts
+            </div>
             <div className="text-gray-900 font-bold">{faultCount} FAULT — action required</div>
             <div className="text-gray-900 font-bold">{degradedCount} DEGRADED — monitor</div>
-          </div>
+          </motion.div>
 
           <div className="flex items-center justify-between border-t border-gray-150 pt-3">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-black text-xs text-gray-700 shrink-0">
-                MK
+              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-black text-xs text-gray-700 shrink-0 transition-transform hover:scale-110">
+                {user.name.split(' ').map(n => n[0]).join('')}
               </div>
               <div className="min-w-0">
                 <div className="text-xs font-black text-gray-950 truncate uppercase leading-none">{user.name}</div>
-                <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Sim Engineer • Day</div>
+                <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Sim Engineer • Day</div>
               </div>
             </div>
-            <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-colors shrink-0">
+            <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 active:scale-90">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
@@ -393,45 +476,65 @@ export default function EngineerDashboard() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden bg-white">
+      <main className="flex-1 flex flex-col overflow-hidden bg-white w-full">
         <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30">
-          <div className="flex items-center gap-3">
-            <h1 className="text-sm font-black uppercase text-gray-950">Maintenance & Shift Overview</h1>
-            {activeFault && (
-              <span className="bg-red-50 text-brand-red border border-brand-red text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none">
-                {faultCount} Fault Active
-              </span>
-            )}
+          <div className="flex items-center gap-3 min-w-0">
+            <h1 className="text-sm font-black uppercase text-gray-950 truncate">Maintenance & Shift Overview</h1>
+            <AnimatePresence>
+              {activeFault && (
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="bg-red-50 text-brand-red border border-brand-red text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none shrink-0 shadow-sm"
+                >
+                  {faultCount} Fault Active
+                </motion.span>
+              )}
+            </AnimatePresence>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider hidden sm:block">
               {topBarDateLabel} • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
             </span>
             <button
               onClick={handleCheckout}
               disabled={checkoutPending}
-              className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 disabled:opacity-50"
+              className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-sm cursor-pointer"
             >
               {checkoutPending ? 'Checking Out...' : 'Checkout Shift'}
             </button>
-            <div className="flex items-center gap-1 bg-gray-50 border border-gray-150 px-2 py-1 rounded">
+            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded shadow-inner">
               <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping" />
               <span className="text-[9px] font-black text-gray-900">{currentTime.toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
             </div>
           </div>
         </header>
 
-        {(checkoutTime || checkoutError) && (
-          <div className={`mx-6 mt-4 p-3 rounded border text-xs font-bold ${checkoutError ? 'bg-red-50 border-red-300 text-brand-red' : 'bg-green-50 border-green-300 text-green-700'}`}>
-            {checkoutError
-              ? checkoutError
-              : `Checkout verified at ${formatLocalDateTime(checkoutTime ?? undefined)}`}
-          </div>
-        )}
+        <AnimatePresence>
+          {(checkoutTime || checkoutError) && (
+            <motion.div
+              variants={slideInTop}
+              initial="hidden"
+              animate="show"
+              exit="exit"
+              className={`mx-6 mt-4 p-3 rounded border text-xs font-bold shadow-sm ${checkoutError ? 'bg-red-50 border-red-300 text-brand-red' : 'bg-green-50 border-green-400 text-green-800'}`}
+            >
+              {checkoutError
+                ? checkoutError
+                : `Checkout verified at ${formatLocalDateTime(checkoutTime ?? undefined)}`}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="flex-1 flex overflow-hidden">
-          <div className="w-3/5 h-full overflow-y-auto p-6 space-y-6">
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="w-3/5 h-full overflow-y-auto p-6 space-y-6"
+          >
+            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">
@@ -440,16 +543,16 @@ export default function EngineerDashboard() {
                   <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Maintenance Shift Calendar</p>
                 </div>
                 <div className="flex gap-1">
-                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600">&lt;</button>
-                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600">&gt;</button>
+                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600 transition-colors active:scale-90">&lt;</button>
+                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600 transition-colors active:scale-90">&gt;</button>
                 </div>
               </div>
 
-              <div className="flex gap-4 text-[9px] font-black uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 text-gray-500">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-brand-red" /> Shift Day</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Signed Off</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> AOG Event</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-gray-300" /> Off</span>
+              <div className="flex flex-wrap gap-4 text-[9px] font-black uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 text-gray-500">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-brand-red shadow-[0_0_5px_rgba(239,68,68,0.5)]" /> Shift Day</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]" /> Signed Off</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.5)]" /> AOG Event</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-300" /> Off</span>
               </div>
 
               <div className="grid grid-cols-7 gap-1 text-center text-xs">
@@ -467,28 +570,32 @@ export default function EngineerDashboard() {
                   const isAog = aogDays.includes(day);
 
                   return (
-                    <div key={day} className={`border border-gray-100 py-2 relative flex flex-col items-center justify-between h-14 ${isToday ? 'bg-red-50 border-brand-red shadow-sm' : 'bg-white'}`}>
+                    <motion.div
+                      key={day}
+                      whileHover={{ scale: 1.05 }}
+                      className={`border py-2 relative flex flex-col items-center justify-between h-14 transition-colors cursor-default ${isToday ? 'bg-red-50 border-brand-red shadow-sm' : 'bg-white border-gray-100 hover:border-gray-200'}`}
+                    >
                       <span className={`text-[10px] font-black ${isToday ? 'text-brand-red text-xs' : 'text-gray-900'}`}>{day}</span>
-                      {isToday && <span className="text-[7px] font-black text-brand-red uppercase leading-none">NOW</span>}
+                      {isToday && <span className="text-[7px] font-black text-brand-red uppercase leading-none mt-1">NOW</span>}
                       <div className="flex gap-0.5 justify-center mt-auto pb-1">
                         {isShift && <span className="w-1.5 h-1.5 rounded-full bg-brand-red" />}
                         {isSignedOff && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
                         {isAog && <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
 
-              <div className="mt-4 border-t border-gray-150 pt-4 flex items-center justify-between">
+              <div className="mt-4 border-t border-gray-100 pt-4 flex items-center justify-between">
                 <span className="text-xs font-bold text-gray-900">
                   {currentTime.toLocaleDateString('en-GB', { month: 'long', day: 'numeric', year: 'numeric' })} • Daily checklist signed off
                 </span>
-                <span className="bg-green-50 text-green-600 border border-green-500 text-[8px] font-black px-2 py-0.5 rounded uppercase">Complete</span>
+                <span className="bg-green-50 text-green-700 border border-green-500 text-[8px] font-black px-2 py-0.5 rounded uppercase">Complete</span>
               </div>
             </div>
 
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-4">
+            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow space-y-4">
               <div className="flex justify-between items-center border-b border-gray-100 pb-3">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 bg-brand-red rounded-full" />
@@ -499,153 +606,76 @@ export default function EngineerDashboard() {
                 </span>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">06:00</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
-                    <p className="text-gray-600 truncate">Shift handover received from Night Eng. R. Yamada</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">06:15</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                    <p className="text-gray-600 truncate">Motion platform pre-flight check — PASSED (all 6 axes nominal)</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">07:30</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                    <p className="text-gray-600 truncate">Visual system calibration completed — 3-channel alignment verified</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">09:12</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
-                    <p className="text-gray-600 truncate">FMS / Avionics Bus — B737 FMC comms fault detected. Investigating.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">09:45</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" />
-                    <p className="text-gray-600 truncate">CH-2 VHF dropout logged. Intermittent — monitoring.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">11:00</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400 shrink-0" />
-                    <p className="text-gray-600 truncate">Instructor briefing support — SIM-01 session Type Rating (Capt. Holt)</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 text-xs">
-                  <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">12:30</span>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                    <p className="text-gray-600 truncate">Hydraulic system pressure check — 3000 psi nominal</p>
-                  </div>
-                </div>
-              </div>
+              <motion.div
+                variants={listContainer}
+                initial="hidden"
+                animate="show"
+                className="space-y-3"
+              >
+                {mockShiftLog.map((log, index) => (
+                  <motion.div variants={listItem} key={index} className="flex items-start gap-3 text-xs group">
+                    <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">{log.time}</span>
+                    <div className="flex items-center gap-2 min-w-0 p-1 -m-1 rounded group-hover:bg-gray-50 transition-colors flex-1">
+                      <span className={`w-1.5 h-1.5 rounded-full ${log.iconColor} shrink-0`} />
+                      <p className="text-gray-600 truncate">{log.text}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </motion.div>
 
-              <div className="border-t border-gray-150 pt-4 flex justify-between items-center">
-                <button className="text-brand-red hover:underline text-xs font-black uppercase tracking-wider">
+              <div className="border-t border-gray-100 pt-4 flex justify-between items-center">
+                <button className="text-brand-red hover:text-red-700 transition-colors text-xs font-black uppercase tracking-wider cursor-pointer active:scale-95 flex items-center gap-1">
                   Export Full Shift Report (PDF)
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
 
-          <div className="w-2/5 h-full border-l border-gray-200 p-6 overflow-y-auto space-y-6">
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <div className="flex flex-col">
-                  <span className="text-[8px] font-black text-brand-red uppercase tracking-wider">Hardware Health Monitor</span>
-                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider mt-0.5">Hardware Status</h3>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3 }}
+            className="w-2/5 h-full border-l border-gray-200 p-6 overflow-y-auto space-y-6 bg-gray-50/30"
+          >
+            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow space-y-6">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3 min-w-0">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[8px] font-black text-brand-red uppercase tracking-wider truncate">Hardware Health Monitor</span>
+                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider mt-0.5 truncate">Hardware Status</h3>
                 </div>
-                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase border ${currentStatus === 'Ready'
-                    ? 'bg-green-50 text-green-700 border-green-500'
-                    : currentStatus === 'MEL'
-                      ? 'bg-orange-50 text-orange-600 border-orange-400'
-                      : 'bg-red-50 text-brand-red border-brand-red'
+                <span className={`text-[8px] shrink-0 font-black px-1.5 py-0.5 rounded uppercase border transition-colors ${currentStatus === 'Ready'
+                  ? 'bg-green-50 text-green-700 border-green-500'
+                  : currentStatus === 'MEL'
+                    ? 'bg-orange-50 text-orange-700 border-orange-400'
+                    : 'bg-red-50 text-brand-red border-brand-red'
                   }`}>{currentStatus}</span>
               </div>
 
               <div className="space-y-1">
-                <h4 className="text-xs font-black text-gray-900">Target Machine: {currentSimulator?.name ?? 'N/A'}</h4>
-                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">{currentSimulator ? `${currentSimulator.typeRating} • STATUS: ${currentStatus}` : 'No simulator selected'}</p>
-                <div className={`mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-wider ${isCurrentSimulatorSignedOffToday ? 'bg-green-50 text-green-700 border-green-400' : 'bg-orange-50 text-orange-700 border-orange-300'}`}>
-                  <span className={`w-2 h-2 rounded-full ${isCurrentSimulatorSignedOffToday ? 'bg-green-500' : 'bg-orange-500'}`} />
+                <h4 className="text-xs font-black text-gray-900 truncate">Target Machine: {currentSimulator?.name ?? 'N/A'}</h4>
+                <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider truncate">{currentSimulator ? `${currentSimulator.typeRating} • STATUS: ${currentStatus}` : 'No simulator selected'}</p>
+                <div className={`mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-wider transition-colors ${isCurrentSimulatorSignedOffToday ? 'bg-green-50 text-green-700 border-green-400 shadow-sm' : 'bg-orange-50 text-orange-700 border-orange-300'}`}>
+                  <span className={`w-2 h-2 rounded-full ${isCurrentSimulatorSignedOffToday ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`} />
                   <span>{isCurrentSimulatorSignedOffToday ? 'Daily Sign-Off Cleared' : 'Daily Sign-Off Pending'}</span>
                 </div>
               </div>
 
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Motion Platform</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">99.2%</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Visual System</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">120 Hz</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Image Generators</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">74 °C</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Comms / Audio</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-orange-500 font-black">DEGRADED</span>
-                    <span className="w-2 h-2 rounded-full bg-orange-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Hydraulic Power</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">3000 psi</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Thermal / HVAC</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">21.4 °C</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-800">Data Recorder</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-green-600 font-black">2.1 TB</span>
-                    <span className="w-2 h-2 rounded-full bg-green-500" />
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
-                  <span className="font-bold text-gray-855">FMS / Avionics Bus</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-brand-red font-black">ERR</span>
-                    <span className="w-2 h-2 rounded-full bg-brand-red" />
-                  </div>
-                </div>
-              </div>
+              <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
+                {hardwareComponents.map((comp, idx) => (
+                  <motion.div variants={listItem} key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 px-1 rounded hover:bg-gray-50 transition-colors">
+                    <span className="font-bold text-gray-800">{comp.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`${comp.statusClass} font-black`}>{comp.value}</span>
+                      <span className={`w-2 h-2 rounded-full ${comp.dotClass}`} />
+                    </div>
+                  </motion.div>
+                ))}
+              </motion.div>
 
               <div className="space-y-3 pt-3 border-t border-gray-100">
                 <button
                   onClick={() => setShowAogModal(true)}
-                  className="w-full py-3 bg-brand-red hover:bg-red-700 text-white font-black text-xs uppercase tracking-widest rounded transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer"
+                  className="w-full py-3 bg-brand-red hover:bg-red-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer active:scale-[0.98]"
                 >
                   Report Hardware Breakdown (AOG)
                 </button>
@@ -655,164 +685,183 @@ export default function EngineerDashboard() {
                     setShowResolveModal(true);
                   }}
                   disabled={!currentSimulator || isReadyStatus(currentSimulator.status)}
-                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest rounded transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-green-600 cursor-pointer disabled:opacity-50"
+                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-green-600 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]"
                 >
                   Resolve Defect
                 </button>
                 <button
                   onClick={handleSignOff}
                   disabled={maintPending}
-                  className="w-full py-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 font-black text-xs uppercase tracking-widest rounded transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer disabled:opacity-50"
+                  className="w-full py-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]"
                 >
                   {maintPending ? 'Submitting Checklist...' : 'Sign-off Daily Maintenance'}
                 </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         </div>
       </main>
 
-      {showAogModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white rounded border border-gray-200 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-red-50/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-brand-red flex items-center justify-center text-white shrink-0">
-                  <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
+      <AnimatePresence>
+        {showAogModal && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="w-full max-w-md bg-white rounded border border-gray-200 shadow-2xl overflow-hidden"
+            >
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-red-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-brand-red flex items-center justify-center text-white shrink-0 shadow-sm">
+                    <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-black uppercase text-gray-955 leading-none tracking-wider">
+                      Aircraft On Ground — AOG Report
+                    </h2>
+                    <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 tracking-wide">
+                      {currentSimulator ? currentSimulator.name : 'Simulator'} · {currentTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h2 className="text-sm font-black uppercase text-gray-955 leading-none tracking-wider">
-                    Aircraft On Ground — AOG Report
-                  </h2>
-                  <p className="text-[9px] text-gray-400 font-bold uppercase mt-1 tracking-wide">
-                    {currentSimulator ? currentSimulator.name : 'Simulator'} · {currentTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAogModal(false);
-                  setAffectedSystem('');
-                  setFailureDescription('');
-                }}
-                className="text-gray-400 hover:text-brand-red transition-colors shrink-0"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <form onSubmit={handleAogSubmit} className="p-5 space-y-4">
-              <div>
-                <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
-                  Affected System
-                </label>
-                <select
-                  required
-                  value={affectedSystem}
-                  onChange={(e) => setAffectedSystem(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded text-xs font-bold text-gray-905 bg-white focus:outline-none focus:ring-1 focus:ring-brand-red focus:border-brand-red"
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAogModal(false);
+                    setAffectedSystem('');
+                    setFailureDescription('');
+                  }}
+                  className="text-gray-400 hover:text-brand-red transition-colors shrink-0 active:scale-90"
                 >
-                  <option value="">Select system...</option>
-                  <option value="Motion System">Motion System</option>
-                  <option value="Visual System">Visual System</option>
-                  <option value="Flight Controls">Flight Controls</option>
-                  <option value="Avionics & Instruments">Avionics & Instruments</option>
-                  <option value="Host Computer">Host Computer</option>
-                  <option value="Host Computer">Host Computer</option>
-                </select>
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
 
-              <div>
-                <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
-                  Severity Classification
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSeverity('AOG')}
-                    className={`p-3 border rounded text-left transition-all relative ${severity === 'AOG'
+              <form onSubmit={handleAogSubmit} className="p-5 space-y-4">
+                <div>
+                  <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
+                    Affected System
+                  </label>
+                  <select
+                    required
+                    value={affectedSystem}
+                    onChange={(e) => setAffectedSystem(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded text-xs font-bold text-gray-905 bg-white focus:outline-none focus:ring-1 focus:ring-brand-red focus:border-brand-red transition-colors"
+                  >
+                    <option value="">Select system...</option>
+                    <option value="Motion System">Motion System</option>
+                    <option value="Visual System">Visual System</option>
+                    <option value="Flight Controls">Flight Controls</option>
+                    <option value="Avionics & Instruments">Avionics & Instruments</option>
+                    <option value="Host Computer">Host Computer</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
+                    Severity Classification
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSeverity('AOG')}
+                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'AOG'
                         ? 'border-brand-red bg-red-50 text-brand-red shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                      }`}
-                  >
-                    <span className="text-[10px] font-black uppercase tracking-wider block">AOG</span>
-                    <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Grounded</span>
-                  </button>
+                        }`}
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider block">AOG</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Grounded</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setSeverity('MEL')}
-                    className={`p-3 border rounded text-left transition-all relative ${severity === 'MEL'
-                        ? 'border-orange-500 bg-orange-50 text-orange-500 shadow-sm'
+                    <button
+                      type="button"
+                      onClick={() => setSeverity('MEL')}
+                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'MEL'
+                        ? 'border-orange-500 bg-orange-50 text-orange-600 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                      }`}
-                  >
-                    <span className="text-[10px] font-black uppercase tracking-wider block">MEL</span>
-                    <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Dispatch with limits</span>
-                  </button>
+                        }`}
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider block">MEL</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Dispatch with limits</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setSeverity('Defect')}
-                    className={`p-3 border rounded text-left transition-all relative ${severity === 'Defect'
-                        ? 'border-yellow-500 bg-yellow-50 text-yellow-600 shadow-sm'
+                    <button
+                      type="button"
+                      onClick={() => setSeverity('Defect')}
+                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'Defect'
+                        ? 'border-yellow-500 bg-yellow-50 text-yellow-700 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
-                      }`}
-                  >
-                    <span className="text-[10px] font-black uppercase tracking-wider block">Defect</span>
-                    <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Log & monitor</span>
-                  </button>
+                        }`}
+                    >
+                      <span className="text-[10px] font-black uppercase tracking-wider block">Defect</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Log & monitor</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
-                  Fault Description
-                </label>
-                <textarea
-                  required
-                  rows={4}
-                  value={failureDescription}
-                  onChange={(e) => setFailureDescription(e.target.value)}
-                  placeholder="Describe the fault in technical detail..."
-                  className="w-full p-3 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-brand-red focus:border-brand-red resize-none"
-                />
-              </div>
-
-              {severity === 'AOG' && (
-                <div className="p-3 bg-red-50/70 border border-red-100 rounded flex items-start gap-2.5">
-                  <svg className="w-4 h-4 text-brand-red mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                  <p className="text-[9px] text-brand-red font-bold leading-normal">
-                    Submitting this report will immediately ground the selected machine and notify the Shift Supervisor, Safety Officer, and CAA compliance desk.
-                  </p>
+                <div>
+                  <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
+                    Fault Description
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={failureDescription}
+                    onChange={(e) => setFailureDescription(e.target.value)}
+                    placeholder="Describe the fault in technical detail..."
+                    className="w-full p-3 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-brand-red focus:border-brand-red resize-none transition-colors"
+                  />
                 </div>
-              )}
 
-              <button
-                type="submit"
-                className={`w-full py-3.5 flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none cursor-pointer text-white ${severity === 'AOG'
+                <AnimatePresence>
+                  {severity === 'AOG' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="p-3 bg-red-50/70 border border-red-200 rounded flex items-start gap-2.5 mt-2">
+                        <svg className="w-4 h-4 text-brand-red mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <p className="text-[9px] text-brand-red font-bold leading-normal">
+                          Submitting this report will immediately ground the selected machine and notify the Shift Supervisor, Safety Officer, and CAA compliance desk.
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <button
+                  type="submit"
+                  className={`w-full py-3.5 flex items-center justify-center gap-2 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none cursor-pointer text-white shadow-md active:scale-95 ${severity === 'AOG'
                     ? 'bg-brand-red hover:bg-red-700 focus:ring-2 focus:ring-brand-red'
                     : severity === 'MEL'
                       ? 'bg-orange-500 hover:bg-orange-600 focus:ring-2 focus:ring-orange-500'
                       : 'bg-yellow-600 hover:bg-yellow-700 focus:ring-2 focus:ring-yellow-600'
-                  }`}
-              >
-                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span>Submit {severity} Report</span>
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+                    }`}
+                >
+                  <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span>Submit {severity} Report</span>
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ResolveDefectModal
         isOpen={showResolveModal}
@@ -829,88 +878,113 @@ export default function EngineerDashboard() {
         errorMessage={resolveError}
       />
 
-      {showMaintModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
-              Maintenance Shield Checklist Sign-Off
-            </h3>
-            <form onSubmit={handleSubmitMaintenanceSignOff} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Select Simulator
-                </label>
-                <select
-                  value={maintTargetSimId}
-                  onChange={(e) => setMaintTargetSimId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900"
-                >
-                  {simulators.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="engineer-cleared"
-                  checked={maintIsCleared}
-                  onChange={(e) => setMaintIsCleared(e.target.checked)}
-                  className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red"
-                />
-                <label htmlFor="engineer-cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider">
-                  Checklist Cleared (Raise Shield)
-                </label>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Engineering Notes
-                </label>
-                <textarea
-                  required
-                  value={maintNotes}
-                  onChange={(e) => setMaintNotes(e.target.value)}
-                  placeholder="Notes from safety checks and compliance checklist..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                  rows={3}
-                />
-              </div>
-
-              {maintError && (
-                <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold">
-                  {maintError}
+      <AnimatePresence>
+        {showMaintModal && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white border border-gray-100 p-6 rounded shadow-2xl max-w-md w-full"
+            >
+              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+                Maintenance Shield Checklist Sign-Off
+              </h3>
+              <form onSubmit={handleSubmitMaintenanceSignOff} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Select Simulator
+                  </label>
+                  <select
+                    value={maintTargetSimId}
+                    onChange={(e) => setMaintTargetSimId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900 focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors focus:outline-none"
+                  >
+                    {simulators.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
+                    ))}
+                  </select>
                 </div>
-              )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="engineer-cleared"
+                    checked={maintIsCleared}
+                    onChange={(e) => setMaintIsCleared(e.target.checked)}
+                    className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red cursor-pointer"
+                  />
+                  <label htmlFor="engineer-cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer select-none">
+                    Checklist Cleared (Raise Shield)
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Engineering Notes
+                  </label>
+                  <textarea
+                    required
+                    value={maintNotes}
+                    onChange={(e) => setMaintNotes(e.target.value)}
+                    placeholder="Notes from safety checks and compliance checklist..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors focus:outline-none resize-none"
+                    rows={3}
+                  />
+                </div>
 
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowMaintModal(false)}
-                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={maintPending}
-                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50"
-                >
-                  {maintPending ? 'Submitting...' : 'Sign Off Checklist'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                <AnimatePresence>
+                  {maintError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold overflow-hidden"
+                    >
+                      {maintError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-      {showSuccessToast && (
-        <div className="fixed bottom-5 right-5 z-55 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded p-3 shadow-md flex items-center gap-2 animate-in slide-in-from-bottom-5">
-          <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>{activeFault ? 'AOG breakdown report broadcasted.' : 'Defect resolved. Simulator status set to READY.'}</span>
-        </div>
-      )}
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowMaintModal(false)}
+                    className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={maintPending}
+                    className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-95 transition-all shadow-md"
+                  >
+                    {maintPending ? 'Submitting...' : 'Sign Off Checklist'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSuccessToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="fixed bottom-5 right-5 z-55 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded p-3 shadow-lg flex items-center gap-2"
+          >
+            <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{activeFault ? 'AOG breakdown report broadcasted.' : 'Defect resolved. Simulator status set to READY.'}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { getSessions, publishSession, completeGrading, terminateSessionEarly, startSession, SimulatorSession } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 
@@ -13,6 +14,39 @@ interface ExtendedSession extends SimulatorSession {
   simulatorName: string;
 }
 
+// --- Framer Motion Variants ---
+const listContainer: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 }
+  }
+};
+
+const listItem: Variants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } }
+};
+
+const modalBackdrop: Variants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.2 } },
+  exit: { opacity: 0, transition: { duration: 0.15 } }
+};
+
+const modalContent: Variants = {
+  hidden: { opacity: 0, scale: 0.95, y: 10 },
+  show: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, scale: 0.95, y: 10, transition: { duration: 0.15 } }
+};
+
+const slideInRight: Variants = {
+  hidden: { opacity: 0, x: 20 },
+  show: { opacity: 1, x: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, x: 20, transition: { duration: 0.15 } }
+};
+
+// --- Utilities ---
 const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
 
 const addLocalDays = (value: Date, days: number) =>
@@ -54,7 +88,7 @@ const getStatusBadgeStyle = (status: string) => {
   switch (status) {
     case 'InProgress':
       return {
-        badge: 'bg-amber-50 text-amber-700 border-amber-400 animate-pulse',
+        badge: 'bg-amber-50 text-amber-700 border-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.5)]',
         label: 'IN PROGRESS',
       };
     case 'Completed':
@@ -254,9 +288,14 @@ export default function InstructorDashboard() {
   if (authLoading || !user || !mounted || loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-sm font-bold uppercase tracking-widest text-brand-red animate-pulse">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+          className="text-sm font-bold uppercase tracking-widest text-brand-red"
+        >
           Loading Instructor Portal...
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -280,27 +319,27 @@ export default function InstructorDashboard() {
   const completedCount = visibleSessions.filter(s => s.status === 'Completed').length;
 
   return (
-    <div className="h-screen flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
-      <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30">
-        <div className="flex items-center gap-6">
+    <div className="h-screen flex flex-col bg-white text-gray-900 overflow-hidden font-sans w-full">
+      <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+        <div className="flex items-center gap-6 min-w-0">
           <div className="flex items-center gap-2">
             <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
-            <div className="flex flex-col">
-              <span className="text-xs font-black tracking-widest text-gray-950">LION SIMPLANNER</span>
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Instructor Portal</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-black tracking-widest text-gray-950 truncate">LION SIMPLANNER</span>
+              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider truncate">Instructor Portal</span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 shrink-0">
           <div className="hidden md:flex flex-col text-right">
-            <span className="text-xs font-black text-gray-955 uppercase leading-none">{user.name}</span>
-            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Type Rating Instructor • TRI/TRE</span>
+            <span className="text-xs font-black text-gray-955 uppercase leading-none truncate">{user.name}</span>
+            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Type Rating Instructor • TRI/TRE</span>
           </div>
-          <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0">
-            SO
+          <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0 transition-transform hover:scale-110">
+            {user.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
           </div>
-          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-colors shrink-0 ml-1">
+          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 ml-1 active:scale-90">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
@@ -309,27 +348,31 @@ export default function InstructorDashboard() {
       </header>
 
       <div className="flex-1 flex overflow-hidden">
-        <aside className="w-[20%] border-r border-gray-200 p-4 space-y-6 overflow-y-auto shrink-0 bg-white">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
+        <aside className="w-[20%] border-r border-gray-200 p-4 space-y-6 overflow-y-auto shrink-0 bg-white shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid grid-cols-3 gap-2"
+          >
+            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Window</span>
               <span className="text-lg font-black text-gray-955 mt-1 block">{visibleCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
+            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Pending</span>
               <span className="text-lg font-black text-brand-red mt-1 block">{pendingCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
+            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
               <span className="text-[10px] text-gray-400 font-bold block uppercase">Done</span>
               <span className="text-lg font-black text-green-600 mt-1 block">{completedCount}</span>
             </div>
-          </div>
+          </motion.div>
 
           <div className="space-y-3">
-            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-              All Sessions
+            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-red" /> All Sessions
             </div>
-            <div className="space-y-2">
+            <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2">
               {visibleSessions.map(s => {
                 const localStart = toLocalDate(s.startTime);
                 const timeLabel = localStart
@@ -338,10 +381,11 @@ export default function InstructorDashboard() {
                 const style = getStatusBadgeStyle(s.status);
 
                 return (
-                  <div
+                  <motion.div
+                    variants={listItem}
                     key={s.sessionId}
                     onClick={() => setSelectedSession(s)}
-                    className={`p-3 border rounded bg-white cursor-pointer transition-all ${selectedSession?.sessionId === s.sessionId
+                    className={`p-3 border rounded bg-white cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${selectedSession?.sessionId === s.sessionId
                       ? 'border-brand-red shadow-sm'
                       : 'border-gray-150 hover:border-gray-300'
                       }`}
@@ -350,40 +394,44 @@ export default function InstructorDashboard() {
                     <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
                     <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
                       <span>{timeLabel} • {s.phase}</span>
-                      <span className={`px-1.5 py-0.5 rounded border leading-none font-bold ${style.badge}`}>
+                      <span className={`px-1.5 py-0.5 rounded border leading-none font-bold transition-colors ${style.badge}`}>
                         {style.label}
                       </span>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
-            </div>
+            </motion.div>
           </div>
         </aside>
 
-        <section className="w-[55%] p-6 overflow-y-auto bg-white border-r border-gray-200 flex flex-col">
-          <div className="border border-gray-150 rounded p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <div>
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">14-Day Schedule</h3>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">{calendarRangeLabel}</p>
+        <section className="w-[55%] p-6 overflow-y-auto bg-gray-50/30 border-r border-gray-200 flex flex-col">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="border border-gray-150 rounded p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-center justify-between mb-4 shrink-0 min-w-0">
+              <div className="min-w-0">
+                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider truncate">14-Day Schedule</h3>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{calendarRangeLabel}</p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={goToPreviousWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
                 >
                   Prev 14d
                 </button>
                 <button
                   onClick={goToTodayWindow}
-                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50"
+                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 active:scale-95 transition-all cursor-pointer"
                 >
                   Today
                 </button>
                 <button
                   onClick={goToNextWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
                 >
                   Next 14d
                 </button>
@@ -398,9 +446,9 @@ export default function InstructorDashboard() {
                 >
                   <div>Time</div>
                   {visibleDays.map((day) => (
-                    <div key={toLocalDateKey(day)} className="border-l border-gray-100 flex flex-col justify-center">
-                      <span>{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
-                      <span className="text-xs font-black text-gray-900 mt-0.5">{day.getDate()}</span>
+                    <div key={toLocalDateKey(day)} className="border-l border-gray-100 flex flex-col justify-center min-w-0">
+                      <span className="truncate">{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+                      <span className="text-xs font-black text-gray-900 mt-0.5 truncate">{day.getDate()}</span>
                     </div>
                   ))}
                 </div>
@@ -441,14 +489,18 @@ export default function InstructorDashboard() {
                             if (topOffset < 0 || topOffset > 455) return null;
 
                             return (
-                              <div
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                whileHover={{ scale: 1.05, zIndex: 30 }}
+                                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                                 key={s.sessionId}
                                 onClick={() => setSelectedSession(s)}
                                 style={{
                                   top: `${topOffset}px`,
                                   height: `${height - 2}px`,
                                 }}
-                                className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all z-20 ${selectedSession?.sessionId === s.sessionId
+                                className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-colors z-20 active:scale-95 ${selectedSession?.sessionId === s.sessionId
                                   ? 'bg-brand-red border border-red-800 font-black'
                                   : s.status === 'TerminatedEarly'
                                     ? 'bg-purple-600 border border-purple-800 font-bold'
@@ -460,7 +512,7 @@ export default function InstructorDashboard() {
                                   <div className="text-[7px] opacity-90 truncate font-bold mt-0.5">{s.pilotName}</div>
                                 </div>
                                 <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase} • {s.status}</span>
-                              </div>
+                              </motion.div>
                             );
                           })}
                         </div>
@@ -470,288 +522,343 @@ export default function InstructorDashboard() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         </section>
 
-        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6 shrink-0">
-          {selectedSession ? (
-            <form onSubmit={handleSubmitSyllabus} className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
-              <div className="space-y-4 border-b border-gray-100 pb-4">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase ${getStatusBadgeStyle(selectedSession.status).badge}`}>
-                    {getStatusBadgeStyle(selectedSession.status).label}
-                  </span>
-                  {(selectedSession.status === 'InProgress' || selectedSession.status === 'Scheduled') && (
-                    <button
-                      type="button"
-                      onClick={handleOpenTerminateModal}
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-colors cursor-pointer shrink-0"
-                    >
-                      Terminate Early
-                    </button>
-                  )}
+        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6 shrink-0 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+          <AnimatePresence mode="wait">
+            {selectedSession ? (
+              <motion.form
+                key={selectedSession.sessionId}
+                variants={slideInRight}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                onSubmit={handleSubmitSyllabus}
+                className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6 hover:shadow-md transition-shadow"
+              >
+                <div className="space-y-4 border-b border-gray-100 pb-4 min-w-0">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase transition-colors shrink-0 ${getStatusBadgeStyle(selectedSession.status).badge}`}>
+                      {getStatusBadgeStyle(selectedSession.status).label}
+                    </span>
+                    <AnimatePresence>
+                      {(selectedSession.status === 'InProgress' || selectedSession.status === 'Scheduled') && (
+                        <motion.button
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.9 }}
+                          type="button"
+                          onClick={handleOpenTerminateModal}
+                          className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-sm"
+                        >
+                          Terminate Early
+                        </motion.button>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  <AnimatePresence>
+                    {selectedSession.status === 'Scheduled' && (
+                      <motion.button
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        type="button"
+                        onClick={handleStartSession}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black py-2 px-3 rounded text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-sm overflow-hidden"
+                      >
+                        Start Session
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
+
+                  <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1 truncate">{selectedSession.title}</h3>
+                  <div className="text-[9px] text-gray-400 font-bold uppercase truncate">{toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}</div>
+
+                  <AnimatePresence>
+                    {selectedSession.terminationReason && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="p-2 bg-purple-50 border border-purple-200 text-purple-800 rounded text-[9px] font-bold overflow-hidden"
+                      >
+                        Termination Reason: {selectedSession.terminationReason}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1 min-w-0">
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Captain</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.captainName || (selectedSession.captainId ? selectedSession.captainId.substring(0, 8) : 'Unassigned')}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">First Officer</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.firstOfficerName || (selectedSession.firstOfficerId ? selectedSession.firstOfficerId.substring(0, 8) : 'Unassigned')}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Instructor</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.instructorName || (selectedSession.instructorId ? selectedSession.instructorId.substring(0, 8) : user.name)}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Phase</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.phase}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Simulator</span>
+                      <span className="font-black text-gray-900 truncate block" title={selectedSession.simulatorName}>
+                        {selectedSession.simulatorName}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Trainee Code</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.traineeEmployeeCode || 'N/A'}</span>
+                    </div>
+                  </div>
                 </div>
 
-                {selectedSession.status === 'Scheduled' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-brand-red shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                    <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider">Session Details & Grading</h4>
+                  </div>
+                  <p className="text-[9px] text-gray-455 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
+
+                  <AnimatePresence>
+                    {selectedSession.status !== 'InProgress' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="p-3 bg-amber-50 border border-amber-200 rounded text-[9px] font-bold text-amber-800 flex items-center gap-2 shadow-sm overflow-hidden"
+                      >
+                        <span className="text-xs shrink-0">🔒</span>
+                        <span>Grading is locked. Start session to record grades.</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <fieldset disabled={selectedSession.status !== 'InProgress'} className="space-y-4 transition-opacity duration-200 disabled:opacity-75">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Technical Skills</label>
+                        <select
+                          value={techSkills}
+                          onChange={(e) => setTechSkills(e.target.value)}
+                          className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                          <option value="">—</option>
+                          <option value="5">5 - Excellent</option>
+                          <option value="4">4 - Good</option>
+                          <option value="3">3 - Satisfactory</option>
+                          <option value="2">2 - Weak</option>
+                          <option value="1">1 - Unsatisfactory</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">CRM / Teamwork</label>
+                        <select
+                          value={crmTeamwork}
+                          onChange={(e) => setCrmTeamwork(e.target.value)}
+                          className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                          <option value="">—</option>
+                          <option value="5">5 - Excellent</option>
+                          <option value="4">4 - Good</option>
+                          <option value="3">3 - Satisfactory</option>
+                          <option value="2">2 - Weak</option>
+                          <option value="1">1 - Unsatisfactory</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">SOP Adherence</label>
+                        <select
+                          value={sopAdherence}
+                          onChange={(e) => setSopAdherence(e.target.value)}
+                          className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                          <option value="">—</option>
+                          <option value="5">5 - Excellent</option>
+                          <option value="4">4 - Good</option>
+                          <option value="3">3 - Satisfactory</option>
+                          <option value="2">2 - Weak</option>
+                          <option value="1">1 - Unsatisfactory</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Overall Grade</label>
+                        <select
+                          value={overallGrade}
+                          onChange={(e) => setOverallGrade(e.target.value)}
+                          required={selectedSession.status === 'InProgress'}
+                          className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors disabled:bg-gray-100 disabled:text-gray-400"
+                        >
+                          <option value="">—</option>
+                          <option value="PASSED">PASSED</option>
+                          <option value="FAILED">FAILED</option>
+                          <option value="SATISFACTORY">SATISFACTORY</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Input Teaching Material / Syllabus Notes</label>
+                      <textarea
+                        rows={4}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        required={selectedSession.status === 'InProgress'}
+                        placeholder="Document syllabus coverage, deviations, and instructor recommendations..."
+                        className="w-full text-xs font-bold text-gray-900 p-2.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors resize-none disabled:bg-gray-100 disabled:text-gray-400"
+                      />
+                    </div>
+                  </fieldset>
+                </div>
+
+                <div className="flex gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={handleStartSession}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 px-3 rounded text-[10px] uppercase tracking-wider transition-colors cursor-pointer shadow-sm"
+                    disabled={selectedSession.status !== 'InProgress'}
+                    onClick={() => alert('Draft saved successfully.')}
+                    className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] focus:outline-none cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
                   >
-                    Start Session
+                    Save Draft
                   </button>
-                )}
-
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1">{selectedSession.title}</h3>
-                <div className="text-[9px] text-gray-400 font-bold uppercase">{toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}</div>
-
-                {selectedSession.terminationReason && (
-                  <div className="p-2 bg-purple-50 border border-purple-200 text-purple-800 rounded text-[9px] font-bold">
-                    Termination Reason: {selectedSession.terminationReason}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1">
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Captain</span>
-                    <span className="font-black text-gray-900 truncate block">{selectedSession.captainName || (selectedSession.captainId ? selectedSession.captainId.substring(0, 8) : 'Unassigned')}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">First Officer</span>
-                    <span className="font-black text-gray-900 truncate block">{selectedSession.firstOfficerName || (selectedSession.firstOfficerId ? selectedSession.firstOfficerId.substring(0, 8) : 'Unassigned')}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Instructor</span>
-                    <span className="font-black text-gray-900 truncate block">{selectedSession.instructorName || (selectedSession.instructorId ? selectedSession.instructorId.substring(0, 8) : user.name)}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Phase</span>
-                    <span className="font-black text-gray-900">{selectedSession.phase}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Simulator</span>
-                    <span className="font-black text-gray-900 truncate max-w-[110px] block" title={selectedSession.simulatorName}>
-                      {selectedSession.simulatorName}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px]">Trainee Code</span>
-                    <span className="font-black text-gray-900">{selectedSession.traineeEmployeeCode || 'N/A'}</span>
-                  </div>
+                  <button
+                    type="submit"
+                    disabled={selectedSession.status !== 'InProgress'}
+                    className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Submit Syllabus
+                  </button>
                 </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-brand-red shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                  <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider">Session Details & Grading</h4>
-                </div>
-                <p className="text-[9px] text-gray-455 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
-
-                {selectedSession.status !== 'InProgress' && (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[9px] font-bold text-amber-800 flex items-center gap-2">
-                    <span className="text-xs">🔒</span>
-                    <span>Grading is locked. Start session to record grades.</span>
-                  </div>
-                )}
-
-                <fieldset disabled={selectedSession.status !== 'InProgress'} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Technical Skills</label>
-                      <select
-                        value={techSkills}
-                        onChange={(e) => setTechSkills(e.target.value)}
-                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">—</option>
-                        <option value="5">5 - Excellent</option>
-                        <option value="4">4 - Good</option>
-                        <option value="3">3 - Satisfactory</option>
-                        <option value="2">2 - Weak</option>
-                        <option value="1">1 - Unsatisfactory</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">CRM / Teamwork</label>
-                      <select
-                        value={crmTeamwork}
-                        onChange={(e) => setCrmTeamwork(e.target.value)}
-                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">—</option>
-                        <option value="5">5 - Excellent</option>
-                        <option value="4">4 - Good</option>
-                        <option value="3">3 - Satisfactory</option>
-                        <option value="2">2 - Weak</option>
-                        <option value="1">1 - Unsatisfactory</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">SOP Adherence</label>
-                      <select
-                        value={sopAdherence}
-                        onChange={(e) => setSopAdherence(e.target.value)}
-                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">—</option>
-                        <option value="5">5 - Excellent</option>
-                        <option value="4">4 - Good</option>
-                        <option value="3">3 - Satisfactory</option>
-                        <option value="2">2 - Weak</option>
-                        <option value="1">1 - Unsatisfactory</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Overall Grade</label>
-                      <select
-                        value={overallGrade}
-                        onChange={(e) => setOverallGrade(e.target.value)}
-                        required={selectedSession.status === 'InProgress'}
-                        className="w-full text-xs font-bold text-gray-900 px-2 py-1.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">—</option>
-                        <option value="PASSED">PASSED</option>
-                        <option value="FAILED">FAILED</option>
-                        <option value="SATISFACTORY">SATISFACTORY</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Input Teaching Material / Syllabus Notes</label>
-                    <textarea
-                      rows={4}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      required={selectedSession.status === 'InProgress'}
-                      placeholder="Document syllabus coverage, deviations, and instructor recommendations..."
-                      className="w-full text-xs font-bold text-gray-900 p-2.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red resize-none disabled:bg-gray-100 disabled:text-gray-400"
-                    />
-                  </div>
-                </fieldset>
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  disabled={selectedSession.status !== 'InProgress'}
-                  onClick={() => alert('Draft saved successfully.')}
-                  className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Save Draft
-                </button>
-                <button
-                  type="submit"
-                  disabled={selectedSession.status !== 'InProgress'}
-                  className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Submit Syllabus
-                </button>
-              </div>
-            </form>
-          ) : (
-            <div className="border border-gray-150 rounded p-6 bg-white text-center text-gray-400 text-xs font-bold py-12 uppercase tracking-wider">
-              Select a session in the visible 14-day window to grade
-            </div>
-          )}
+              </motion.form>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="border border-gray-150 rounded p-6 bg-white text-center text-gray-400 text-xs font-bold py-12 uppercase tracking-wider shadow-sm"
+              >
+                Select a session in the visible 14-day window to grade
+              </motion.div>
+            )}
+          </AnimatePresence>
         </aside>
       </div>
 
-      {showTerminateModal && selectedSession && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full border border-gray-200 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
-                Terminate Session Early
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowTerminateModal(false)}
-                className="text-xs font-black text-gray-400 hover:text-brand-red uppercase"
-              >
-                Cancel
-              </button>
-            </div>
-
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1">
-              <span className="font-black uppercase block text-amber-900">Warning</span>
-              <p>This will log the completed hours and instantly release the remaining schedule block.</p>
-            </div>
-
-            <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
-              <div>
-                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
-                  Actual End Time
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={terminateActualEndHour}
-                    onChange={(e) => setTerminateActualEndHour(e.target.value)}
-                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
-                  >
-                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
-                      <option key={hr} value={hr}>{hr}:00</option>
-                    ))}
-                  </select>
-                  <select
-                    value={terminateActualEndMin}
-                    onChange={(e) => setTerminateActualEndMin(e.target.value)}
-                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
-                  >
-                    {['00', '15', '30', '45'].map((min) => (
-                      <option key={min} value={min}>{min} min</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
-                  Termination Reason
-                </label>
-                <select
-                  value={terminateReason}
-                  onChange={(e) => setTerminateReason(e.target.value)}
-                  className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red"
-                >
-                  <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
-                  <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
-                  <option value="Operational Emergency">Operational Emergency</option>
-                  <option value="Weather / Environmental">Weather / Facility Failure</option>
-                </select>
-              </div>
-
-              {terminateError && (
-                <div className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded">
-                  {terminateError}
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-2">
+      <AnimatePresence>
+        {showTerminateModal && selectedSession && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white rounded p-6 max-w-md w-full border border-gray-200 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
+                  Terminate Session Early
+                </h3>
                 <button
                   type="button"
                   onClick={() => setShowTerminateModal(false)}
-                  className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                  className="text-xs font-black text-gray-400 hover:text-brand-red uppercase transition-colors active:scale-90"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-colors"
-                >
-                  Confirm Termination
-                </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1 shadow-sm">
+                <span className="font-black uppercase block text-amber-900">Warning</span>
+                <p>This will log the completed hours and instantly release the remaining schedule block.</p>
+              </div>
+
+              <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Actual End Time
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={terminateActualEndHour}
+                      onChange={(e) => setTerminateActualEndHour(e.target.value)}
+                      className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors w-1/2"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
+                        <option key={hr} value={hr}>{hr}:00</option>
+                      ))}
+                    </select>
+                    <select
+                      value={terminateActualEndMin}
+                      onChange={(e) => setTerminateActualEndMin(e.target.value)}
+                      className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors w-1/2"
+                    >
+                      {['00', '15', '30', '45'].map((min) => (
+                        <option key={min} value={min}>{min} min</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Termination Reason
+                  </label>
+                  <select
+                    value={terminateReason}
+                    onChange={(e) => setTerminateReason(e.target.value)}
+                    className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors"
+                  >
+                    <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
+                    <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
+                    <option value="Operational Emergency">Operational Emergency</option>
+                    <option value="Weather / Environmental">Weather / Facility Failure</option>
+                  </select>
+                </div>
+
+                <AnimatePresence>
+                  {terminateError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded overflow-hidden"
+                    >
+                      {terminateError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTerminateModal(false)}
+                    className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    Confirm Termination
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
