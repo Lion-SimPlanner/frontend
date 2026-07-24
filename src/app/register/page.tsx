@@ -152,7 +152,7 @@ export default function RegisterPage() {
         <p className="mt-8 text-center text-xs text-gray-500 font-bold uppercase tracking-wider">
           Already registered?{' '}
           <Link
-            href="/"
+            href="/login"
             className="text-brand-red hover:text-red-700 transition-colors font-black"
           >
             Sign In Here

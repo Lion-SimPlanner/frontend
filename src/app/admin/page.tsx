@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import {
   getPilotsPriorityQueue,
   getInstructors,
@@ -25,6 +26,37 @@ import {
   SimulatorSession
 } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
+
+const listContainer: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 }
+  }
+};
+
+const listItem: Variants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } }
+};
+
+const modalBackdrop: Variants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.2 } },
+  exit: { opacity: 0, transition: { duration: 0.15 } }
+};
+
+const modalContent: Variants = {
+  hidden: { opacity: 0, scale: 0.95, y: 10 },
+  show: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, scale: 0.95, y: 10, transition: { duration: 0.15 } }
+};
+
+const slideInRight: Variants = {
+  hidden: { opacity: 0, x: 20 },
+  show: { opacity: 1, x: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, x: 20, transition: { duration: 0.15 } }
+};
 
 const toLocalDate = (value?: string) => {
   if (!value) return null;
@@ -357,7 +389,7 @@ export default function AdminPage() {
       setSessions((prev) =>
         prev.map((s) =>
           s.simulatorId === payload.simulatorId &&
-          (s.status === 'Scheduled' || s.status === 'InProgress')
+            (s.status === 'Scheduled' || s.status === 'InProgress')
             ? { ...s, status: 'Cancelled' as const }
             : s
         )
@@ -418,7 +450,7 @@ export default function AdminPage() {
     setSessionStartHour(hour.toString().padStart(2, '0'));
     setSessionStartMin('00');
     setSessionDuration(4);
-    
+
     const endHourNum = Math.min(23, hour + 4);
     setSessionEndHour(endHourNum.toString().padStart(2, '0'));
     setSessionEndMin('00');
@@ -459,7 +491,7 @@ export default function AdminPage() {
     setEditEndMin(end.endMinute);
   };
 
-  const handle遊Crew = (p: PilotPriority) => {
+  const handleAssignCrew = (p: PilotPriority) => {
     if (!selectedSlot) return;
     if (p.isExternalUser) {
       if (!assignedCaptain) {
@@ -697,9 +729,14 @@ export default function AdminPage() {
   if (authLoading || !user || !mounted) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-sm font-bold uppercase tracking-widest text-brand-red animate-pulse">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+          className="text-sm font-bold uppercase tracking-widest text-brand-red"
+        >
           Loading Simulator Operations Interface...
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -740,10 +777,10 @@ export default function AdminPage() {
 
   const referenceSessionStartIso = selectedSlot
     ? localDateFromKeyAndTime(
-        sessionDateKey,
-        parseInt(sessionStartHour, 10),
-        parseInt(sessionStartMin, 10)
-      ).toISOString()
+      sessionDateKey,
+      parseInt(sessionStartHour, 10),
+      parseInt(sessionStartMin, 10)
+    ).toISOString()
     : new Date().toISOString();
 
   const nowLocal = new Date();
@@ -790,13 +827,19 @@ export default function AdminPage() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`text-xs font-black uppercase tracking-wider py-5 px-1 transition-colors shrink-0 ${
-                activeTab === tab
-                  ? 'border-b-2 border-brand-red text-brand-red'
-                  : 'text-gray-600 hover:text-brand-red'
-              }`}
+              className="relative text-xs font-black uppercase tracking-wider py-5 px-1 transition-colors shrink-0 outline-none hover:text-brand-red focus-visible:ring-2 focus-visible:ring-brand-red"
             >
-              {tab}
+              <span className={activeTab === tab ? 'text-brand-red' : 'text-gray-600'}>
+                {tab}
+              </span>
+              {activeTab === tab && (
+                <motion.div
+                  layoutId="activeTab"
+                  className="absolute bottom-0 left-0 right-0 h-[2px] bg-brand-red"
+                  initial={false}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                />
+              )}
             </button>
           ))}
         </nav>
@@ -808,14 +851,14 @@ export default function AdminPage() {
                 setAogSimId(simulators[0]?.id || '');
                 setShowAogModal(true);
               }}
-              className="bg-brand-red hover:bg-red-700 text-white font-black text-[9px] px-3 py-1.5 uppercase tracking-wider rounded cursor-pointer transition-colors"
+              className="bg-brand-red hover:bg-red-700 active:scale-95 text-white font-black text-[9px] px-3 py-1.5 uppercase tracking-wider rounded cursor-pointer transition-all duration-150"
             >
               DECLARE AOG
             </button>
           )}
 
           <div className="flex items-center gap-3 pl-4 border-l border-gray-150">
-            <div className="w-7 h-7 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0">
+            <div className="w-7 h-7 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0 transition-transform duration-200 hover:scale-110">
               {user.name.split(' ').map(n => n[0]).join('')}
             </div>
             <div className="hidden md:flex flex-col min-w-0">
@@ -824,7 +867,7 @@ export default function AdminPage() {
             </div>
             <button
               onClick={logout}
-              className="text-gray-400 hover:text-brand-red transition-colors cursor-pointer ml-1 shrink-0"
+              className="text-gray-400 hover:text-brand-red active:scale-90 transition-all cursor-pointer ml-1 shrink-0"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -834,127 +877,157 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {publishSuccess && (
-        <div className="m-4 p-3 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded flex items-center gap-3 shrink-0">
-          <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>{publishSuccess}</span>
-        </div>
-      )}
+      <AnimatePresence>
+        {publishSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-20 left-1/2 -translate-x-1/2 z-40 m-4 p-3 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded flex items-center gap-3 shadow-lg"
+          >
+            <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>{publishSuccess}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {activeTab === 'Engineers' && (
-        <div className="flex-1 flex overflow-hidden bg-white w-full">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex-1 flex overflow-hidden bg-white w-full"
+        >
           <div className="flex-none w-80 h-full border-r border-gray-200 p-4 overflow-y-auto space-y-2 min-w-0">
             <div className="mb-4">
               <h3 className="text-xs font-black uppercase tracking-widest text-gray-950 mb-1">Simulator Machines</h3>
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Select a machine to view hardware details</p>
             </div>
-            {simulators.map((sim) => {
-              const tone = getSimulatorStatusTone(sim.status);
-              return (
-              <button
-                key={sim.id}
-                onClick={() => setSelectedHwSimId(sim.id)}
-                className={`w-full text-left p-4 border rounded transition-all ${
-                  selectedHwSimId === sim.id
-                    ? 'border-brand-red bg-red-50 shadow-sm'
-                    : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-black text-gray-900 leading-tight truncate">{sim.name}</div>
-                    <div className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-1 truncate">{sim.typeRating} · Last sign-off {sim.lastDailySignOffDate ?? 'N/A'}</div>
-                  </div>
-                  <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none border ${tone.badge}`}>
-                    {tone.label}
-                  </span>
-                </div>
-              </button>
-              );
-            })}
-          </div>
-
-          <div className="flex-1 h-full overflow-y-auto p-6 min-w-0">
-            {(() => {
-              const hw = selectedHwSim;
-              if (!hw) {
+            <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2">
+              {simulators.map((sim) => {
+                const tone = getSimulatorStatusTone(sim.status);
                 return (
-                  <div className="w-full max-w-xl">
-                    <div className="border border-gray-150 rounded p-6 bg-white shadow-sm text-xs font-bold text-gray-500 uppercase tracking-wider">
-                      No simulator records loaded.
-                    </div>
-                  </div>
-                );
-              }
-
-              const tone = getSimulatorStatusTone(hw.status);
-              const components = buildHardwareComponents(hw.status);
-
-              return (
-                <div className="w-full max-w-xl space-y-6">
-                  <div className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
-                    <div className="flex items-center justify-between border-b border-gray-100 pb-4 gap-4 min-w-0">
+                  <motion.button
+                    variants={listItem}
+                    key={sim.id}
+                    onClick={() => setSelectedHwSimId(sim.id)}
+                    className={`w-full text-left p-4 border rounded transition-all duration-200 active:scale-[0.98] ${selectedHwSimId === sim.id
+                        ? 'border-brand-red bg-red-50 shadow-sm scale-[1.02]'
+                        : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 hover:scale-[1.02]'
+                      }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 min-w-0">
                       <div className="min-w-0 flex-1">
-                        <span className="text-[8px] font-black text-brand-red uppercase tracking-wider block">Hardware Health Monitor</span>
-                        <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1 truncate">{hw.name}</h3>
-                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{hw.typeRating} · Last sign-off {hw.lastDailySignOffDate ?? 'N/A'}</p>
+                        <div className="text-xs font-black text-gray-900 leading-tight truncate">{sim.name}</div>
+                        <div className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-1 truncate">{sim.typeRating} · Last sign-off {sim.lastDailySignOffDate ?? 'N/A'}</div>
                       </div>
-                      <span className={`shrink-0 text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none border ${tone.badge}`}>
+                      <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none border transition-colors ${tone.badge}`}>
                         {tone.label}
                       </span>
                     </div>
+                  </motion.button>
+                );
+              })}
+            </motion.div>
+          </div>
 
-                    <div className="space-y-2.5">
-                      {components.map(c => (
-                        <div key={c.label} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 gap-4">
-                          <span className="font-bold text-gray-800 truncate">{c.label}</span>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className={`font-black ${
-                              c.state === 'err' ? 'text-brand-red'
-                              : c.state === 'warn' ? 'text-orange-500'
-                              : 'text-green-600'
-                            }`}>{c.value}</span>
-                            <span className={`w-2 h-2 rounded-full ${
-                              c.state === 'err' ? 'bg-brand-red'
-                              : c.state === 'warn' ? 'bg-orange-500'
-                              : 'bg-green-500'
-                            }`} />
+          <div className="flex-1 h-full overflow-y-auto p-6 min-w-0">
+            <AnimatePresence mode="wait">
+              {(() => {
+                const hw = selectedHwSim;
+                if (!hw) {
+                  return (
+                    <motion.div
+                      key="empty"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="w-full max-w-xl"
+                    >
+                      <div className="border border-gray-150 rounded p-6 bg-white shadow-sm text-xs font-bold text-gray-500 uppercase tracking-wider">
+                        No simulator records loaded.
+                      </div>
+                    </motion.div>
+                  );
+                }
+
+                const tone = getSimulatorStatusTone(hw.status);
+                const components = buildHardwareComponents(hw.status);
+
+                return (
+                  <motion.div
+                    key={hw.id}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    className="w-full max-w-xl space-y-6"
+                  >
+                    <div className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6 transition-all hover:shadow-md">
+                      <div className="flex items-center justify-between border-b border-gray-100 pb-4 gap-4 min-w-0">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[8px] font-black text-brand-red uppercase tracking-wider block">Hardware Health Monitor</span>
+                          <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1 truncate">{hw.name}</h3>
+                          <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{hw.typeRating} · Last sign-off {hw.lastDailySignOffDate ?? 'N/A'}</p>
+                        </div>
+                        <span className={`shrink-0 text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none border transition-colors ${tone.badge}`}>
+                          {tone.label}
+                        </span>
+                      </div>
+
+                      <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
+                        {components.map(c => (
+                          <motion.div variants={listItem} key={c.label} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 gap-4 group hover:bg-gray-50 transition-colors rounded px-1">
+                            <span className="font-bold text-gray-800 truncate">{c.label}</span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`font-black transition-colors ${c.state === 'err' ? 'text-brand-red'
+                                  : c.state === 'warn' ? 'text-orange-500'
+                                    : 'text-green-600'
+                                }`}>{c.value}</span>
+                              <span className={`w-2 h-2 rounded-full transition-colors ${c.state === 'err' ? 'bg-brand-red shadow-[0_0_8px_rgba(239,68,68,0.6)]'
+                                  : c.state === 'warn' ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]'
+                                    : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+                                }`} />
+                            </div>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+
+                      <div className="pt-2 border-t border-gray-100 shrink-0">
+                        <div className="flex flex-wrap gap-3">
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                            <span className="w-2 h-2 rounded-full bg-green-500" /> OK
                           </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="pt-2 border-t border-gray-100 shrink-0">
-                      <div className="flex flex-wrap gap-3">
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
-                          <span className="w-2 h-2 rounded-full bg-green-500" /> OK
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
-                          <span className="w-2 h-2 rounded-full bg-orange-500" /> Warning
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
-                          <span className="w-2 h-2 rounded-full bg-brand-red" /> Fault / AOG
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                            <span className="w-2 h-2 rounded-full bg-orange-500" /> Warning
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                            <span className="w-2 h-2 rounded-full bg-brand-red" /> Fault / AOG
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              );
-            })()}
+                  </motion.div>
+                );
+              })()}
+            </AnimatePresence>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {activeTab === 'Instructors' && (
-        <div className="flex-1 overflow-auto bg-white p-6 w-full min-w-0">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex-1 overflow-auto bg-white p-6 w-full min-w-0"
+        >
           <div className="mb-5 flex items-center justify-between gap-4 min-w-0">
             <div className="min-w-0 flex-1">
               <h2 className="text-sm font-black uppercase text-gray-955 tracking-wider truncate">Pilot Training Grades</h2>
               <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">All completed simulator sessions graded by instructors</p>
             </div>
-            <span className="bg-brand-red text-white text-[9px] font-black px-2.5 py-1 rounded uppercase tracking-wider shrink-0">
+            <span className="bg-brand-red text-white text-[9px] font-black px-2.5 py-1 rounded uppercase tracking-wider shrink-0 transition-transform hover:scale-105">
               {mockPilotGrades.length} Records
             </span>
           </div>
@@ -968,15 +1041,23 @@ export default function AdminPage() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <motion.tbody
+                variants={listContainer}
+                initial="hidden"
+                animate="show"
+                className="divide-y divide-gray-100"
+              >
                 {mockPilotGrades.map((g, i) => (
-                  <tr key={i} className="bg-white hover:bg-gray-50 transition-colors">
+                  <motion.tr
+                    variants={listItem}
+                    key={i}
+                    className="bg-white hover:bg-gray-50 transition-colors"
+                  >
                     <td className="px-3 py-3 font-black text-gray-900 whitespace-nowrap">{g.pilot}</td>
                     <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.empCode}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none ${
-                        g.rank === 'Captain' ? 'bg-blue-50 text-blue-600 border border-blue-300' : 'bg-gray-50 text-gray-500 border border-gray-300'
-                      }`}>{g.rank}</span>
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none transition-colors ${g.rank === 'Captain' ? 'bg-blue-50 text-blue-600 border border-blue-300' : 'bg-gray-50 text-gray-500 border border-gray-300'
+                        }`}>{g.rank}</span>
                     </td>
                     <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.date}</td>
                     <td className="px-3 py-3 font-bold text-gray-800 max-w-[160px] truncate" title={g.session}>{g.session}</td>
@@ -984,31 +1065,34 @@ export default function AdminPage() {
                     <td className="px-3 py-3 font-black text-center text-gray-900">{g.crm}</td>
                     <td className="px-3 py-3 font-black text-center text-gray-900">{g.sop}</td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none border ${
-                        g.overall === 'Excellent' ? 'bg-green-50 text-green-600 border-green-400'
-                        : g.overall === 'Unsatisfactory' ? 'bg-red-50 text-brand-red border-brand-red'
-                        : 'bg-blue-50 text-blue-600 border-blue-300'
-                      }`}>{g.overall}</span>
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none border transition-colors ${g.overall === 'Excellent' ? 'bg-green-50 text-green-600 border-green-400'
+                          : g.overall === 'Unsatisfactory' ? 'bg-red-50 text-brand-red border-brand-red'
+                            : 'bg-blue-50 text-blue-600 border-blue-300'
+                        }`}>{g.overall}</span>
                     </td>
                     <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.instructor}</td>
                     <td className="px-3 py-3 font-bold text-gray-400 max-w-[200px] truncate" title={g.notes}>{g.notes}</td>
-                  </tr>
+                  </motion.tr>
                 ))}
-              </tbody>
+              </motion.tbody>
             </table>
           </div>
-        </div>
+        </motion.div>
       )}
 
       {activeTab === 'Dashboard' && (
-        <div className="flex-1 flex overflow-hidden bg-white w-full">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex-1 flex overflow-hidden bg-white w-full"
+        >
           <div className="flex-initial w-80 h-full overflow-y-auto border-r border-gray-200 p-4 space-y-6 min-w-0 shrink-0">
             <div className="min-w-0">
               <div className="flex items-center justify-between mb-3 gap-2">
                 <h3 className="text-xs font-black tracking-widest uppercase text-gray-955 truncate">
                   Available Pilots
                 </h3>
-                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0">
+                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0 transition-transform hover:scale-110">
                   {filteredPilots.length}
                 </span>
               </div>
@@ -1018,7 +1102,7 @@ export default function AdminPage() {
                   setExternalUserError(null);
                   setShowExternalUserModal(true);
                 }}
-                className="w-full mb-3 bg-brand-red hover:bg-red-700 text-white text-[9px] font-black uppercase tracking-wider py-2 rounded cursor-pointer"
+                className="w-full mb-3 bg-brand-red hover:bg-red-700 active:scale-[0.98] transition-all duration-150 text-white text-[9px] font-black uppercase tracking-wider py-2 rounded cursor-pointer"
               >
                 + Add External User
               </button>
@@ -1029,18 +1113,17 @@ export default function AdminPage() {
                   value={pilotSearch}
                   onChange={(e) => setPilotSearch(e.target.value)}
                   placeholder="Search pilots..."
-                  className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs font-bold text-gray-900 focus:outline-none focus:border-brand-red bg-white"
+                  className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs font-bold text-gray-900 focus:outline-none focus:border-brand-red bg-white transition-colors"
                 />
                 <div className="flex flex-wrap gap-1">
                   {['ALL', 'B737-800NG', 'B737-900ER', 'B737 MAX 8', 'A320-200', 'A320neo', 'A330-300', 'A330-900neo', 'ATR 72-500', 'ATR 72-600'].map(rating => (
                     <button
                       key={rating}
                       onClick={() => setSelectedRatingFilter(rating)}
-                      className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded border shrink-0 ${
-                        selectedRatingFilter === rating
-                          ? 'bg-brand-red text-white border-brand-red'
+                      className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded border shrink-0 transition-all active:scale-95 ${selectedRatingFilter === rating
+                          ? 'bg-brand-red text-white border-brand-red scale-105'
                           : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                      }`}
+                        }`}
                     >
                       {rating}
                     </button>
@@ -1048,76 +1131,86 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
-                {filteredPilots.map(p => {
-                  const expiryDays = Math.max(0, Math.ceil((new Date(p.nextTrainingDue).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
-                  const ftl = getFtlState(p.lastDutyEndTime, referenceSessionStartIso);
-                  let expiryColorClass = '';
-                  if (expiryDays <= 10) {
-                    expiryColorClass = 'text-brand-red bg-red-50 border border-brand-red';
-                  } else if (expiryDays > 20) {
-                    expiryColorClass = 'text-green-600 bg-green-50 border border-green-500';
-                  } else {
-                    expiryColorClass = 'text-gray-500 bg-gray-50 border border-gray-300';
-                  }
-                  return (
-                    <div key={p.pilotId} className="p-2 border border-gray-150 rounded bg-white flex items-start justify-between gap-2 min-w-0">
-                      <div className="flex items-start gap-2 flex-1 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0 mt-0.5">
-                          {p.fullName.split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-black text-gray-900 truncate flex items-center gap-1.5">
-                            <span className="truncate">{p.fullName}</span>
-                            {p.isExternalUser && (
-                              <span className="shrink-0 text-[8px] font-black uppercase px-1 py-0.5 rounded border border-orange-400 bg-orange-50 text-orange-700 leading-none">
-                                EXT
-                              </span>
-                            )}
+              <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                <AnimatePresence>
+                  {filteredPilots.map(p => {
+                    const expiryDays = Math.max(0, Math.ceil((new Date(p.nextTrainingDue).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
+                    const ftl = getFtlState(p.lastDutyEndTime, referenceSessionStartIso);
+                    let expiryColorClass = '';
+                    if (expiryDays <= 10) {
+                      expiryColorClass = 'text-brand-red bg-red-50 border border-brand-red';
+                    } else if (expiryDays > 20) {
+                      expiryColorClass = 'text-green-600 bg-green-50 border border-green-500';
+                    } else {
+                      expiryColorClass = 'text-gray-500 bg-gray-50 border border-gray-300';
+                    }
+                    return (
+                      <motion.div
+                        variants={listItem}
+                        layout
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        key={p.pilotId}
+                        className="p-2 border border-gray-150 rounded bg-white flex items-start justify-between gap-2 min-w-0 transition-all hover:scale-[1.02] hover:shadow-md cursor-default"
+                      >
+                        <div className="flex items-start gap-2 flex-1 min-w-0">
+                          <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0 mt-0.5">
+                            {p.fullName.split(' ').map(n => n[0]).join('')}
                           </div>
-                          <div className="text-[9px] text-gray-400 uppercase flex flex-wrap items-center gap-1.5 mt-0.5 min-w-0">
-                            <span className="truncate">{p.rank}</span>
-                            <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none shrink-0 ${expiryColorClass}`}>
-                              EXP IN {expiryDays}D
-                            </span>
-                          </div>
-                          <div className="mt-1.5 p-1.5 border rounded bg-gray-50 flex flex-col gap-1 min-w-0">
-                            {ftl.isClear ? (
-                              <span className="inline-block px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider w-fit shrink-0">
-                                Rest Clear
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-black text-gray-900 truncate flex items-center gap-1.5">
+                              <span className="truncate">{p.fullName}</span>
+                              {p.isExternalUser && (
+                                <span className="shrink-0 text-[8px] font-black uppercase px-1 py-0.5 rounded border border-orange-400 bg-orange-50 text-orange-700 leading-none">
+                                  EXT
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-gray-400 uppercase flex flex-wrap items-center gap-1.5 mt-0.5 min-w-0">
+                              <span className="truncate">{p.rank}</span>
+                              <span className={`text-[8px] font-black uppercase px-1 py-0.5 rounded leading-none shrink-0 ${expiryColorClass}`}>
+                                EXP IN {expiryDays}D
                               </span>
-                            ) : (
-                              <span className="inline-block px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider max-w-full truncate">
-                                Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
-                              </span>
-                            )}
-                            <div className="text-[8px] text-gray-500 uppercase truncate">
-                              Last Duty: {formatLocalTimestamp(p.lastDutyEndTime)} Local
+                            </div>
+                            <div className="mt-1.5 p-1.5 border rounded bg-gray-50 flex flex-col gap-1 min-w-0">
+                              {ftl.isClear ? (
+                                <span className="inline-block px-1.5 py-0.5 rounded border border-green-500 bg-green-50 text-green-700 text-[8px] font-black uppercase tracking-wider w-fit shrink-0">
+                                  Rest Clear
+                                </span>
+                              ) : (
+                                <span className="inline-block px-1.5 py-0.5 rounded border border-brand-red bg-red-50 text-brand-red text-[8px] font-black uppercase tracking-wider max-w-full truncate">
+                                  Mandatory Rest Until {formatLocalTimestamp(ftl.availableFrom ?? undefined)}
+                                </span>
+                              )}
+                              <div className="text-[8px] text-gray-500 uppercase truncate">
+                                Last Duty: {formatLocalTimestamp(p.lastDutyEndTime)} Local
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1.5 shrink-0 max-w-[35%]">
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {p.typeRatings.map((rating, idx) => (
-                            <span key={idx} className="text-[8px] border border-brand-red text-brand-red px-1 py-0.5 rounded font-black uppercase leading-none text-center shrink-0">
-                              {rating}
-                            </span>
-                          ))}
+                        <div className="flex flex-col items-end gap-1.5 shrink-0 max-w-[35%]">
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {p.typeRatings.map((rating, idx) => (
+                              <span key={idx} className="text-[8px] border border-brand-red text-brand-red px-1 py-0.5 rounded font-black uppercase leading-none text-center shrink-0">
+                                {rating}
+                              </span>
+                            ))}
+                          </div>
+                          {selectedSlot && (
+                            <button
+                              onClick={() => handleAssignCrew(p)}
+                              className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-2 py-1 rounded cursor-pointer leading-none shrink-0 transition-transform"
+                            >
+                              Assign
+                            </button>
+                          )}
                         </div>
-                        {selectedSlot && (
-                          <button
-                            onClick={() => handle遊Crew(p)}
-                            className="bg-brand-red hover:bg-red-700 text-white text-[8px] font-black uppercase px-2 py-1 rounded cursor-pointer leading-none shrink-0"
-                          >
-                            Assign
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </motion.div>
             </div>
 
             <div className="border-t border-gray-100 pt-4 min-w-0">
@@ -1125,13 +1218,17 @@ export default function AdminPage() {
                 <h3 className="text-xs font-black tracking-widest uppercase text-gray-955 truncate">
                   Available Instructors
                 </h3>
-                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0">
+                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0 transition-transform hover:scale-110">
                   {instructors.length}
                 </span>
               </div>
-              <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
+              <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
                 {instructors.map(i => (
-                  <div key={i.id} className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 min-w-0">
+                  <motion.div
+                    variants={listItem}
+                    key={i.id}
+                    className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 min-w-0 transition-all hover:scale-[1.02] hover:shadow-md"
+                  >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0">
                         {i.name.split(' ').map(n => n[0]).join('')}
@@ -1176,15 +1273,15 @@ export default function AdminPage() {
                       {selectedSlot && (
                         <button
                           onClick={() => handleAssignInstructor(i)}
-                          className="bg-brand-red hover:bg-red-700 text-white text-[8px] font-black uppercase px-1 py-0.5 rounded cursor-pointer leading-none shrink-0"
+                          className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-1 py-0.5 rounded cursor-pointer leading-none shrink-0 transition-transform"
                         >
                           Assign
                         </button>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
-              </div>
+              </motion.div>
             </div>
 
             <div className="border-t border-gray-100 pt-4 min-w-0">
@@ -1192,13 +1289,17 @@ export default function AdminPage() {
                 <h3 className="text-xs font-black tracking-widest uppercase text-gray-955 truncate">
                   On-Shift Engineers
                 </h3>
-                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0">
+                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0 transition-transform hover:scale-110">
                   {engineers.length}
                 </span>
               </div>
-              <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+              <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
                 {engineers.map(e => (
-                  <div key={e.id} className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 text-xs min-w-0">
+                  <motion.div
+                    variants={listItem}
+                    key={e.id}
+                    className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 text-xs min-w-0 transition-all hover:scale-[1.02] hover:shadow-md"
+                  >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center font-black text-[10px] shrink-0">
                         {e.name.split(' ').map(n => n[0]).join('')}
@@ -1212,9 +1313,9 @@ export default function AdminPage() {
                     <span className="text-[8px] border border-gray-300 text-gray-600 px-1 rounded font-black uppercase shrink-0 leading-none truncate max-w-[25%]">
                       {e.assignedSim}
                     </span>
-                  </div>
+                  </motion.div>
                 ))}
-              </div>
+              </motion.div>
             </div>
 
             <div className="border-t border-gray-100 pt-4 min-w-0">
@@ -1222,29 +1323,33 @@ export default function AdminPage() {
                 <h3 className="text-xs font-black tracking-widest uppercase text-gray-955 truncate">
                   Hardware Status
                 </h3>
-                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0">
+                <span className="px-2 py-0.5 bg-brand-red text-white text-[8px] font-black rounded-full shrink-0 transition-transform hover:scale-110">
                   {simulators.length}
                 </span>
               </div>
-              <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+              <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                 {simulators.map(sim => {
                   const tone = getSimulatorStatusTone(sim.status);
                   return (
-                  <div key={sim.id} className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 text-xs min-w-0">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-black text-gray-900 truncate">Target Machine: {sim.name}</div>
-                      <div className="text-[8px] text-gray-400 uppercase mt-0.5 truncate">{sim.typeRating}</div>
-                    </div>
-                    <span className={`w-2 h-2 rounded-full ${tone.dot} shrink-0`} />
-                  </div>
+                    <motion.div
+                      variants={listItem}
+                      key={sim.id}
+                      className="p-2 border border-gray-150 rounded bg-white flex items-center justify-between gap-2 text-xs min-w-0 transition-all hover:scale-[1.02] hover:shadow-md"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-gray-900 truncate">Target Machine: {sim.name}</div>
+                        <div className="text-[8px] text-gray-400 uppercase mt-0.5 truncate">{sim.typeRating}</div>
+                      </div>
+                      <span className={`w-2 h-2 rounded-full ${tone.dot} shrink-0 transition-colors`} />
+                    </motion.div>
                   );
                 })}
-              </div>
+              </motion.div>
             </div>
           </div>
 
           <div className="flex-1 h-full overflow-y-auto p-6 min-w-0 flex-grow">
-            <div className="border border-gray-100 rounded p-6 bg-white shadow-sm w-full">
+            <div className="border border-gray-100 rounded p-6 bg-white shadow-sm w-full transition-shadow hover:shadow-md">
               <div className="mb-4 min-w-0">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1258,19 +1363,19 @@ export default function AdminPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={goToPreviousWindow}
-                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0"
+                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
                     >
                       Prev 14d
                     </button>
                     <button
                       onClick={goToTodayWindow}
-                      className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 shrink-0"
+                      className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 shrink-0 active:scale-95 transition-all"
                     >
                       Today
                     </button>
                     <button
                       onClick={goToNextWindow}
-                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0"
+                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
                     >
                       Next 14d
                     </button>
@@ -1330,36 +1435,40 @@ export default function AdminPage() {
                               <div
                                 key={dayKey}
                                 onClick={() => handleCellClick(dayKey, hour)}
-                                className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors min-w-0 ${
-                                  isSelectedDraft
-                                    ? 'bg-red-50'
-                                    : 'bg-white hover:bg-red-50/20 cursor-pointer'
-                                }`}
+                                className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors duration-200 min-w-0 ${isSelectedDraft
+                                    ? 'bg-red-50/50'
+                                    : 'bg-white hover:bg-gray-50 cursor-pointer'
+                                  }`}
                               >
                                 {engineerCovered && (
                                   <span className="absolute top-1 right-1 text-[7px] font-black uppercase text-blue-700 bg-blue-100 border border-blue-200 px-1 rounded leading-none z-30 shrink-0">
                                     Eng
                                   </span>
                                 )}
-                                {isSelectedDraft && startHourSelected && (
-                                  <div
-                                    style={{
-                                      top: `${Math.round((parseInt(sessionStartMin) / 60) * 56) + 2}px`,
-                                      height: `${(sessionDuration * 56) - 4}px`
-                                    }}
-                                    className="absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-10 flex flex-col justify-between border bg-brand-red text-white border-brand-red animate-pulse min-w-0"
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="uppercase font-extrabold tracking-wide">DRAFT</div>
-                                      <div className="truncate opacity-95">
-                                        {assignedCaptain ? assignedCaptain.fullName : 'No Captain'}
+                                <AnimatePresence>
+                                  {isSelectedDraft && startHourSelected && (
+                                    <motion.div
+                                      initial={{ opacity: 0, scaleY: 0.8, originY: 0 }}
+                                      animate={{ opacity: 1, scaleY: 1 }}
+                                      exit={{ opacity: 0, scaleY: 0.8 }}
+                                      style={{
+                                        top: `${Math.round((parseInt(sessionStartMin) / 60) * 56) + 2}px`,
+                                        height: `${(sessionDuration * 56) - 4}px`
+                                      }}
+                                      className="absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-10 flex flex-col justify-between border bg-brand-red text-white border-brand-red animate-pulse min-w-0 shadow-lg"
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="uppercase font-extrabold tracking-wide">DRAFT</div>
+                                        <div className="truncate opacity-95">
+                                          {assignedCaptain ? assignedCaptain.fullName : 'No Captain'}
+                                        </div>
                                       </div>
-                                    </div>
-                                    <div className="uppercase tracking-widest text-[7px] truncate opacity-90">
-                                      {simulators.find(sim => sim.id === selectedSimId)?.name || 'SIM'}
-                                    </div>
-                                  </div>
-                                )}
+                                      <div className="uppercase tracking-widest text-[7px] truncate opacity-90">
+                                        {simulators.find(sim => sim.id === selectedSimId)?.name || 'SIM'}
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
 
                                 {startingSessions.map(s => {
                                   const start = toLocalDate(s.startTime);
@@ -1370,7 +1479,11 @@ export default function AdminPage() {
                                   const isSpecial = s.sessionType === 'InitialTypeRating' || s.sessionType === 'OPC';
 
                                   return (
-                                    <div
+                                    <motion.div
+                                      layout
+                                      initial={{ opacity: 0, scale: 0.9 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                                       key={s.sessionId}
                                       style={{
                                         top: `${topOffsetPx}px`,
@@ -1383,11 +1496,10 @@ export default function AdminPage() {
                                         setIsRescheduleMode(false);
                                         setRescheduleViolations([]);
                                       }}
-                                      className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 ${
-                                        isSpecial
+                                      className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 transition-transform active:scale-95 shadow-sm hover:shadow-md hover:z-30 ${isSpecial
                                           ? 'bg-brand-red text-white border-brand-red hover:bg-red-800'
                                           : 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200'
-                                      }`}
+                                        }`}
                                     >
                                       <div className="min-w-0">
                                         <div className="uppercase truncate">{s.sessionType}</div>
@@ -1399,7 +1511,7 @@ export default function AdminPage() {
                                         <span className="truncate">{simulators.find(sim => sim.id === s.simulatorId)?.name || 'SIM'}</span>
                                         <span className="shrink-0">{duration}h</span>
                                       </div>
-                                    </div>
+                                    </motion.div>
                                   );
                                 })}
                               </div>
@@ -1414,722 +1526,847 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <div className="flex-initial w-80 h-full overflow-y-auto border-l border-gray-200 p-4 shrink-0 bg-white min-w-0">
-            {viewedSession ? (
-              <div className="border border-gray-200 rounded p-4 bg-white space-y-5 min-w-0">
-                <div className="border-b border-gray-100 pb-3 flex items-center justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-xs font-black text-gray-900 uppercase truncate">
-                      Session Details
-                    </h3>
-                    <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
-                      {viewedSession.status} {isRescheduleMode ? '• Edit Mode' : '• Read-Only'}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setViewedSession(null);
-                      setIsRescheduleMode(false);
-                      setRescheduleViolations([]);
-                    }}
-                    className="text-xs font-black uppercase text-gray-400 hover:text-brand-red cursor-pointer shrink-0"
-                  >
-                    Close
-                  </button>
-                </div>
-
-                {(viewedSession.status === 'InProgress' || viewedSession.status === 'Scheduled') && !isRescheduleMode && (
-                  <div className="space-y-2 shrink-0">
-                    {viewedSession.status === 'Scheduled' && (
-                      <button
-                        onClick={() => handleStartSession(viewedSession)}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shadow-sm"
-                      >
-                        Start Session
-                      </button>
-                    )}
-                    {viewedSession.status === 'Scheduled' && (
-                      <button
-                        onClick={handleStartReschedule}
-                        className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors"
-                      >
-                        Edit / Reschedule
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleOpenTerminateModal(viewedSession)}
-                      className="w-full bg-amber-600 hover:bg-amber-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors"
-                    >
-                      Terminate Early
-                    </button>
-                  </div>
-                )}
-
-                <div className="space-y-3.5 text-xs font-bold text-gray-700 min-w-0">
-                  <div className="min-w-0">
-                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Status</span>
-                    <span className={`px-2 py-0.5 border text-[9px] font-black rounded uppercase inline-block ${
-                      viewedSession.status === 'Completed'
-                        ? 'bg-green-50 text-green-700 border-green-400'
-                        : viewedSession.status === 'InProgress'
-                          ? 'bg-amber-50 text-amber-700 border-amber-400 animate-pulse'
-                          : viewedSession.status === 'TerminatedEarly'
-                            ? 'bg-purple-50 text-purple-700 border-purple-400'
-                            : viewedSession.status === 'Cancelled'
-                              ? 'bg-red-50 text-brand-red border-brand-red'
-                              : 'bg-blue-50 text-blue-700 border-blue-400'
-                    }`}>
-                      {viewedSession.status}
-                    </span>
-                    {viewedSession.terminationReason && (
-                      <div className="text-[9px] font-bold text-purple-700 mt-1">Reason: {viewedSession.terminationReason}</div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0">
-                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Session Type</span>
-                    <span className="text-xs font-black text-gray-900 uppercase truncate block">{viewedSession.sessionType}</span>
-                  </div>
-
-                  <div className="min-w-0">
-                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Schedule</span>
-                    {(() => {
-                      const viewedStart = toLocalDate(viewedSession.startTime);
-                      const viewedEnd = toLocalDate(viewedSession.endTime);
-                      if (!viewedStart || !viewedEnd) {
-                        return <span className="text-gray-955">N/A</span>;
-                      }
-
-                      if (isRescheduleMode) {
-                        return (
-                          <div className="space-y-2 mt-1">
-                            <div>
-                              <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Date</label>
-                              <input
-                                type="date"
-                                value={editDateKey}
-                                onChange={(e) => setEditDateKey(e.target.value)}
-                                className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Start Time</label>
-                                <div className="flex gap-1">
-                                  <select
-                                    value={editStartHour}
-                                    onChange={(e) => handleEditStartTimeChange(e.target.value, editStartMin)}
-                                    className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                                  >
-                                    {['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'].map(hr => (
-                                      <option key={hr} value={hr}>{hr}</option>
-                                    ))}
-                                  </select>
-                                  <select
-                                    value={editStartMin}
-                                    onChange={(e) => handleEditStartTimeChange(editStartHour, e.target.value)}
-                                    className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                                  >
-                                    {['00', '15', '30', '45'].map(min => (
-                                      <option key={min} value={min}>{min}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </div>
-                              <div>
-                                <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Duration</label>
-                                <select
-                                  value={editDuration}
-                                  onChange={(e) => handleEditDurationChange(parseFloat(e.target.value))}
-                                  className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                                >
-                                  {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(h => (
-                                    <option key={h} value={h}>{h} {h === 1 ? 'Hr' : 'Hrs'}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            </div>
-                            <div className="text-[9px] text-gray-500 truncate">
-                              {editDateKey ? editDateKey : 'No Date selected'} • {editStartHour}:{editStartMin} - {editEndHour}:{editEndMin} Local
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="min-w-0">
-                          <span className="text-gray-955 block truncate">
-                            {viewedStart.toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                          </span>
-                          <div className="text-[9px] text-gray-500 mt-0.5 truncate">
-                            {viewedStart.getHours().toString().padStart(2, '0')}:
-                            {viewedStart.getMinutes().toString().padStart(2, '0')} - {' '}
-                            {viewedEnd.getHours().toString().padStart(2, '0')}:
-                            {viewedEnd.getMinutes().toString().padStart(2, '0')} Local
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="min-w-0">
-                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Simulator</span>
-                    <span className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-850 text-[9px] block truncate">
-                      {simulators.find(sim => sim.id === viewedSession.simulatorId)?.name || 'SIM'}
-                    </span>
-                  </div>
-
-                  <div className="border-t border-gray-100 pt-3 space-y-2 min-w-0">
-                    <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Crew</span>
-                    
-                    <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
-                        C
-                      </div>
+          <AnimatePresence mode="wait">
+            {(viewedSession || selectedSlot) && (
+              <motion.div
+                key={viewedSession ? 'viewer' : 'builder'}
+                variants={slideInRight}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="flex-initial w-80 h-full overflow-y-auto border-l border-gray-200 p-4 shrink-0 bg-white min-w-0 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.05)] z-20"
+              >
+                {viewedSession ? (
+                  <div className="border border-gray-200 rounded p-4 bg-white space-y-5 min-w-0">
+                    <div className="border-b border-gray-100 pb-3 flex items-center justify-between gap-2 min-w-0">
                       <div className="min-w-0 flex-1">
-                        <div className="font-black text-gray-900 text-xs truncate">
-                          {pilots.find(p => p.pilotId === viewedSession.captainId)?.fullName || 'Unassigned'}
-                        </div>
-                        <div className="text-[8px] text-gray-400 uppercase">Captain</div>
+                        <h3 className="text-xs font-black text-gray-900 uppercase truncate">
+                          Session Details
+                        </h3>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
+                          {viewedSession.status} {isRescheduleMode ? '• Edit Mode' : '• Read-Only'}
+                        </p>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
-                        F
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-black text-gray-900 text-xs truncate">
-                          {pilots.find(p => p.pilotId === viewedSession.firstOfficerId)?.fullName || 'Unassigned'}
-                        </div>
-                        <div className="text-[8px] text-gray-400 uppercase">First Officer</div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
-                        I
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-black text-gray-900 text-xs truncate">
-                          {instructors.find(i => i.id === viewedSession.instructorId)?.name || 'Unassigned'}
-                        </div>
-                        <div className="text-[8px] text-gray-400 uppercase">Instructor</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {isRescheduleMode && (
-                  <div className="space-y-3">
-                    {rescheduleViolations.length > 0 && (
-                      <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold max-w-full overflow-hidden">
-                        <ul className="list-disc list-inside space-y-0.5 break-words">
-                          {rescheduleViolations.map((v, idx) => (
-                            <li key={idx} className="leading-tight">{v}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => {
+                          setViewedSession(null);
                           setIsRescheduleMode(false);
                           setRescheduleViolations([]);
                         }}
-                        className="w-full border border-gray-200 hover:bg-gray-50 text-gray-700 font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
+                        className="text-xs font-black uppercase text-gray-400 hover:text-brand-red cursor-pointer shrink-0 transition-colors active:scale-95"
                       >
-                        Cancel Edit
-                      </button>
-                      <button
-                        onClick={handleSaveReschedule}
-                        className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
-                      >
-                        Save Changes
+                        Close
                       </button>
                     </div>
-                  </div>
-                )}
 
-                {user.role === 'Admin' && (
-                  <button
-                    onClick={() => handleCancelSession(viewedSession.sessionId)}
-                    className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-colors shrink-0"
-                  >
-                    Cancel Session
-                  </button>
-                )}
-              </div>
-            ) : selectedSlot ? (
-              <div className="border border-gray-200 rounded p-4 bg-white space-y-5 min-w-0">
-                <div className="border-b border-gray-100 pb-3 flex items-center justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-xs font-black text-gray-955 uppercase truncate">
-                      Session Builder
-                    </h3>
-                    <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
-                      {localDateFromKeyAndTime(sessionDateKey, 0, 0).toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setSelectedSlot(null)}
-                    className="text-xs font-black uppercase text-gray-400 hover:text-brand-red cursor-pointer shrink-0"
-                  >
-                    Deselect
-                  </button>
-                </div>
+                    <AnimatePresence>
+                      {(viewedSession.status === 'InProgress' || viewedSession.status === 'Scheduled') && !isRescheduleMode && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-2 shrink-0 overflow-hidden"
+                        >
+                          {viewedSession.status === 'Scheduled' && (
+                            <button
+                              onClick={() => handleStartSession(viewedSession)}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all shadow-sm"
+                            >
+                              Start Session
+                            </button>
+                          )}
+                          {viewedSession.status === 'Scheduled' && (
+                            <button
+                              onClick={handleStartReschedule}
+                              className="w-full bg-brand-red hover:bg-red-700 active:scale-95 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all"
+                            >
+                              Edit / Reschedule
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleOpenTerminateModal(viewedSession)}
+                            className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all"
+                          >
+                            Terminate Early
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
-                <div className="space-y-4 min-w-0">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                        Start
-                      </label>
-                      <div className="flex gap-0.5">
-                        <select
-                          value={sessionStartHour}
-                          onChange={(e) => handleStartTimeChange(e.target.value, sessionStartMin)}
-                          className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                    <div className="space-y-3.5 text-xs font-bold text-gray-700 min-w-0">
+                      <div className="min-w-0">
+                        <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Status</span>
+                        <motion.span
+                          layout
+                          className={`px-2 py-0.5 border text-[9px] font-black rounded uppercase inline-block transition-colors ${viewedSession.status === 'Completed'
+                              ? 'bg-green-50 text-green-700 border-green-400'
+                              : viewedSession.status === 'InProgress'
+                                ? 'bg-amber-50 text-amber-700 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
+                                : viewedSession.status === 'TerminatedEarly'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-400'
+                                  : viewedSession.status === 'Cancelled'
+                                    ? 'bg-red-50 text-brand-red border-brand-red'
+                                    : 'bg-blue-50 text-blue-700 border-blue-400'
+                            }`}
                         >
-                          {['06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18'].map(hr => (
-                            <option key={hr} value={hr}>{hr}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={sessionStartMin}
-                          onChange={(e) => handleStartTimeChange(sessionStartHour, e.target.value)}
-                          className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                        >
-                          {['00', '15', '30', '45'].map(min => (
-                            <option key={min} value={min}>{min}</option>
-                          ))}
-                        </select>
+                          {viewedSession.status}
+                        </motion.span>
+                        {viewedSession.terminationReason && (
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[9px] font-bold text-purple-700 mt-1">
+                            Reason: {viewedSession.terminationReason}
+                          </motion.div>
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Session Type</span>
+                        <span className="text-xs font-black text-gray-900 uppercase truncate block">{viewedSession.sessionType}</span>
+                      </div>
+
+                      <motion.div layout className="min-w-0">
+                        <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">Schedule</span>
+                        {(() => {
+                          const viewedStart = toLocalDate(viewedSession.startTime);
+                          const viewedEnd = toLocalDate(viewedSession.endTime);
+                          if (!viewedStart || !viewedEnd) {
+                            return <span className="text-gray-955">N/A</span>;
+                          }
+
+                          if (isRescheduleMode) {
+                            return (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                className="space-y-2 mt-1 overflow-hidden"
+                              >
+                                <div>
+                                  <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Date</label>
+                                  <input
+                                    type="date"
+                                    value={editDateKey}
+                                    onChange={(e) => setEditDateKey(e.target.value)}
+                                    className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Start Time</label>
+                                    <div className="flex gap-1">
+                                      <select
+                                        value={editStartHour}
+                                        onChange={(e) => handleEditStartTimeChange(e.target.value, editStartMin)}
+                                        className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                                      >
+                                        {['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'].map(hr => (
+                                          <option key={hr} value={hr}>{hr}</option>
+                                        ))}
+                                      </select>
+                                      <select
+                                        value={editStartMin}
+                                        onChange={(e) => handleEditStartTimeChange(editStartHour, e.target.value)}
+                                        className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                                      >
+                                        {['00', '15', '30', '45'].map(min => (
+                                          <option key={min} value={min}>{min}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Duration</label>
+                                    <select
+                                      value={editDuration}
+                                      onChange={(e) => handleEditDurationChange(parseFloat(e.target.value))}
+                                      className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                                    >
+                                      {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(h => (
+                                        <option key={h} value={h}>{h} {h === 1 ? 'Hr' : 'Hrs'}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                <div className="text-[9px] text-gray-500 truncate">
+                                  {editDateKey ? editDateKey : 'No Date selected'} • {editStartHour}:{editStartMin} - {editEndHour}:{editEndMin} Local
+                                </div>
+                              </motion.div>
+                            );
+                          }
+
+                          return (
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-w-0">
+                              <span className="text-gray-955 block truncate">
+                                {viewedStart.toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                              </span>
+                              <div className="text-[9px] text-gray-500 mt-0.5 truncate">
+                                {viewedStart.getHours().toString().padStart(2, '0')}:
+                                {viewedStart.getMinutes().toString().padStart(2, '0')} - {' '}
+                                {viewedEnd.getHours().toString().padStart(2, '0')}:
+                                {viewedEnd.getMinutes().toString().padStart(2, '0')} Local
+                              </div>
+                            </motion.div>
+                          );
+                        })()}
+                      </motion.div>
+
+                      <div className="min-w-0">
+                        <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Simulator</span>
+                        <span className="px-1.5 py-0.5 bg-gray-100 rounded text-gray-850 text-[9px] block truncate">
+                          {simulators.find(sim => sim.id === viewedSession.simulatorId)?.name || 'SIM'}
+                        </span>
+                      </div>
+
+                      <div className="border-t border-gray-100 pt-3 space-y-2 min-w-0">
+                        <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Crew</span>
+
+                        <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0 transition-colors hover:bg-gray-100">
+                          <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
+                            C
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-black text-gray-900 text-xs truncate">
+                              {pilots.find(p => p.pilotId === viewedSession.captainId)?.fullName || 'Unassigned'}
+                            </div>
+                            <div className="text-[8px] text-gray-400 uppercase">Captain</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0 transition-colors hover:bg-gray-100">
+                          <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
+                            F
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-black text-gray-900 text-xs truncate">
+                              {pilots.find(p => p.pilotId === viewedSession.firstOfficerId)?.fullName || 'Unassigned'}
+                            </div>
+                            <div className="text-[8px] text-gray-400 uppercase">First Officer</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0 transition-colors hover:bg-gray-100">
+                          <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
+                            I
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-black text-gray-900 text-xs truncate">
+                              {instructors.find(i => i.id === viewedSession.instructorId)?.name || 'Unassigned'}
+                            </div>
+                            <div className="text-[8px] text-gray-400 uppercase">Instructor</div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                        Duration
-                      </label>
-                      <select
-                        value={sessionDuration}
-                        onChange={(e) => handleDurationChange(parseFloat(e.target.value))}
-                        className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                    <AnimatePresence>
+                      {isRescheduleMode && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="space-y-3 overflow-hidden"
+                        >
+                          {rescheduleViolations.length > 0 && (
+                            <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold max-w-full overflow-hidden">
+                              <ul className="list-disc list-inside space-y-0.5 break-words">
+                                {rescheduleViolations.map((v, idx) => (
+                                  <li key={idx} className="leading-tight">{v}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => {
+                                setIsRescheduleMode(false);
+                                setRescheduleViolations([]);
+                              }}
+                              className="w-full border border-gray-200 hover:bg-gray-50 text-gray-700 font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all active:scale-95 shrink-0"
+                            >
+                              Cancel Edit
+                            </button>
+                            <button
+                              onClick={handleSaveReschedule}
+                              className="w-full bg-brand-red hover:bg-red-700 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all active:scale-95 shrink-0"
+                            >
+                              Save Changes
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {user.role === 'Admin' && (
+                      <button
+                        onClick={() => handleCancelSession(viewedSession.sessionId)}
+                        className="w-full bg-brand-red hover:bg-red-700 active:scale-95 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all shrink-0"
                       >
-                        {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(h => (
-                          <option key={h} value={h}>{h} {h === 1 ? 'Hr' : 'Hrs'}</option>
-                        ))}
-                      </select>
-                    </div>
+                        Cancel Session
+                      </button>
+                    )}
                   </div>
+                ) : (
+                  <div className="border border-gray-200 rounded p-4 bg-white space-y-5 min-w-0">
+                    <div className="border-b border-gray-100 pb-3 flex items-center justify-between gap-2 min-w-0">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-xs font-black text-gray-955 uppercase truncate">
+                          Session Builder
+                        </h3>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
+                          {localDateFromKeyAndTime(sessionDateKey, 0, 0).toLocaleDateString('en-GB', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedSlot(null)}
+                        className="text-xs font-black uppercase text-gray-400 hover:text-brand-red cursor-pointer shrink-0 transition-colors active:scale-95"
+                      >
+                        Deselect
+                      </button>
+                    </div>
 
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                      Simulator
-                    </label>
-                    <select
-                      value={selectedSimId}
-                      onChange={(e) => setSelectedSimId(e.target.value)}
-                      className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
+                    <div className="space-y-4 min-w-0">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                            Start
+                          </label>
+                          <div className="flex gap-0.5">
+                            <select
+                              value={sessionStartHour}
+                              onChange={(e) => handleStartTimeChange(e.target.value, sessionStartMin)}
+                              className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                            >
+                              {['06', '07', '08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18'].map(hr => (
+                                <option key={hr} value={hr}>{hr}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={sessionStartMin}
+                              onChange={(e) => handleStartTimeChange(sessionStartHour, e.target.value)}
+                              className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                            >
+                              {['00', '15', '30', '45'].map(min => (
+                                <option key={min} value={min}>{min}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                            Duration
+                          </label>
+                          <select
+                            value={sessionDuration}
+                            onChange={(e) => handleDurationChange(parseFloat(e.target.value))}
+                            className="text-xs font-black text-gray-900 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                          >
+                            {[1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8].map(h => (
+                              <option key={h} value={h}>{h} {h === 1 ? 'Hr' : 'Hrs'}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                          Simulator
+                        </label>
+                        <select
+                          value={selectedSimId}
+                          onChange={(e) => setSelectedSimId(e.target.value)}
+                          className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                        >
+                          {simulators.map(s => (
+                            <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                          Type
+                        </label>
+                        <select
+                          value={selectedSessionType}
+                          onChange={(e) => setSelectedSessionType(e.target.value)}
+                          className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                        >
+                          <option value="Recurrent">Recurrent Training</option>
+                          <option value="OPC">Operator Proficiency Check (OPC)</option>
+                          <option value="LPC">License Proficiency Check (LPC)</option>
+                          <option value="InitialTypeRating">Initial Type Rating</option>
+                          <option value="CommandUpgrade">Command Upgrade Training</option>
+                          <option value="Differences">Differences / Familiarization</option>
+                          <option value="Requalification">Requalification Training</option>
+                          <option value="LOFT">Line-Oriented Flight Training (LOFT)</option>
+                          <option value="SinglePilotCRM">Single-Pilot CRM</option>
+                          <option value="MCC">Multi-Crew Cooperation (MCC)</option>
+                        </select>
+                      </div>
+
+                      <AnimatePresence>
+                        {selectedSimulatorIsAog && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider overflow-hidden"
+                          >
+                            Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <div className="space-y-3 pt-1 min-w-0">
+                        <div className="min-w-0">
+                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Captain Zone</span>
+                          <AnimatePresence mode="popLayout">
+                            {assignedCaptain ? (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                              >
+                                <span className="font-black text-gray-900 truncate flex-1">{assignedCaptain.fullName}</span>
+                                <button onClick={() => setAssignedCaptain(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
+                              </motion.div>
+                            ) : (
+                              <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                              >
+                                Select Captain Card
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+                        <div className="min-w-0">
+                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">First Officer Zone</span>
+                          <AnimatePresence mode="popLayout">
+                            {assignedFO ? (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                              >
+                                <span className="font-black text-gray-900 truncate flex-1">{assignedFO.fullName}</span>
+                                <button onClick={() => setAssignedFO(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
+                              </motion.div>
+                            ) : (
+                              <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                              >
+                                Select First Officer Card
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+                        <div className="min-w-0">
+                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Instructor Zone</span>
+                          <AnimatePresence mode="popLayout">
+                            {assignedInstructor ? (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                              >
+                                <span className="font-black text-gray-900 truncate flex-1">{assignedInstructor.name}</span>
+                                <button onClick={() => setAssignedInstructor(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
+                              </motion.div>
+                            ) : (
+                              <motion.div
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                              >
+                                Select Instructor Card
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    </div>
+
+                    <AnimatePresence>
+                      {validationViolations.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold max-w-full overflow-hidden"
+                        >
+                          <ul className="list-disc list-inside space-y-0.5 break-words">
+                            {validationViolations.map((v, idx) => (
+                              <li key={idx} className="leading-tight">{v}</li>
+                            ))}
+                          </ul>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <button
+                      onClick={handlePublish}
+                      disabled={validationViolations.length > 0}
+                      className="w-full flex justify-center items-center gap-1.5 py-3 border border-transparent rounded shadow text-xs font-black uppercase tracking-widest text-white bg-brand-red hover:bg-red-700 cursor-pointer disabled:opacity-50 shrink-0 transition-all active:scale-95"
                     >
-                      {simulators.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                      Type
-                    </label>
-                    <select
-                      value={selectedSessionType}
-                      onChange={(e) => setSelectedSessionType(e.target.value)}
-                      className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full"
-                    >
-                      <option value="Recurrent">Recurrent Training</option>
-                      <option value="OPC">Operator Proficiency Check (OPC)</option>
-                      <option value="LPC">License Proficiency Check (LPC)</option>
-                      <option value="InitialTypeRating">Initial Type Rating</option>
-                      <option value="CommandUpgrade">Command Upgrade Training</option>
-                      <option value="Differences">Differences / Familiarization</option>
-                      <option value="Requalification">Requalification Training</option>
-                      <option value="LOFT">Line-Oriented Flight Training (LOFT)</option>
-                      <option value="SinglePilotCRM">Single-Pilot CRM</option>
-                      <option value="MCC">Multi-Crew Cooperation (MCC)</option>
-                    </select>
-                  </div>
-
-                  {selectedSimulatorIsAog && (
-                    <div className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider">
-                      Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
-                    </div>
-                  )}
-
-                  <div className="space-y-3 pt-1 min-w-0">
-                    <div className="min-w-0">
-                      <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Captain Zone</span>
-                      {assignedCaptain ? (
-                        <div className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0">
-                          <span className="font-black text-gray-900 truncate flex-1">{assignedCaptain.fullName}</span>
-                          <button onClick={() => setAssignedCaptain(null)} className="text-brand-red font-bold px-1 shrink-0">×</button>
-                        </div>
-                      ) : (
-                        <div className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate">
-                          Select Captain Card
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">First Officer Zone</span>
-                      {assignedFO ? (
-                        <div className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0">
-                          <span className="font-black text-gray-900 truncate flex-1">{assignedFO.fullName}</span>
-                          <button onClick={() => setAssignedFO(null)} className="text-brand-red font-bold px-1 shrink-0">×</button>
-                        </div>
-                      ) : (
-                        <div className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate">
-                          Select First Officer Card
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Instructor Zone</span>
-                      {assignedInstructor ? (
-                        <div className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0">
-                          <span className="font-black text-gray-900 truncate flex-1">{assignedInstructor.name}</span>
-                          <button onClick={() => setAssignedInstructor(null)} className="text-brand-red font-bold px-1 shrink-0">×</button>
-                        </div>
-                      ) : (
-                        <div className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate">
-                          Select Instructor Card
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {validationViolations.length > 0 && (
-                  <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold max-w-full overflow-hidden">
-                    <ul className="list-disc list-inside space-y-0.5 break-words">
-                      {validationViolations.map((v, idx) => (
-                        <li key={idx} className="leading-tight">{v}</li>
-                      ))}
-                    </ul>
+                      <span>Validate & Publish</span>
+                    </button>
                   </div>
                 )}
-
-                <button
-                  onClick={handlePublish}
-                  disabled={validationViolations.length > 0}
-                  className="w-full flex justify-center items-center gap-1.5 py-3 border border-transparent rounded shadow text-xs font-black uppercase tracking-widest text-white bg-brand-red hover:bg-red-700 cursor-pointer disabled:opacity-50 shrink-0"
-                >
-                  <span>Validate & Publish</span>
-                </button>
-              </div>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-200 bg-gray-50 rounded min-w-0">
-                <svg className="w-8 h-8 text-gray-300 mb-2 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <h4 className="text-xs font-black text-gray-450 uppercase tracking-wider text-center truncate w-full">
-                  Pairing Builder Inactive
-                </h4>
-                <p className="text-[9px] font-bold text-gray-400 text-center uppercase tracking-wider mt-1 leading-relaxed max-w-full">
-                  Select an empty calendar grid cell in the center canvas to start scheduling
-                </p>
-              </div>
+              </motion.div>
             )}
-          </div>
-        </div>
+          </AnimatePresence>
+        </motion.div>
       )}
 
-      {showExternalUserModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
-              Add External User
-            </h3>
-            <form onSubmit={handleAddExternalUser} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Full Name
-                </label>
-                <input
-                  required
-                  value={externalFullName}
-                  onChange={(e) => setExternalFullName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Contact Email
-                </label>
-                <input
-                  type="email"
-                  value={externalEmail}
-                  onChange={(e) => setExternalEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Contact Number
-                </label>
-                <input
-                  value={externalContactNumber}
-                  onChange={(e) => setExternalContactNumber(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Company Name
-                </label>
-                <input
-                  value={externalCompanyName}
-                  onChange={(e) => setExternalCompanyName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                />
-              </div>
-              {externalUserError && (
-                <div className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold break-words">
-                  {externalUserError}
-                </div>
-              )}
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowExternalUserModal(false)}
-                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer"
-                >
-                  Add User
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showAogModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
-              Declare Simulator AOG (Down)
-            </h3>
-            <form onSubmit={handleTriggerAog} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Select Simulator
-                </label>
-                <select
-                  value={aogSimId}
-                  onChange={(e) => setAogSimId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900"
-                >
-                  {simulators.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Fault Description
-                </label>
-                <textarea
-                  required
-                  value={aogFault}
-                  onChange={(e) => setAogFault(e.target.value)}
-                  placeholder="Explain mechanical or software issues preventing operations..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                  rows={3}
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowAogModal(false)}
-                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer"
-                >
-                  Trigger Shutdown
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showMaintModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-100 p-6 rounded shadow-xl max-w-md w-full">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
-              Maintenance Shield Checklist Sign-Off
-            </h3>
-            <form onSubmit={handleSubmitMaint} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Select Simulator
-                </label>
-                <select
-                  value={maintSimId}
-                  onChange={(e) => setMaintSimId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900"
-                >
-                  {simulators.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.typeRating})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="maintIsCleared"
-                  checked={maintIsCleared}
-                  onChange={(e) => setMaintIsCleared(e.target.checked)}
-                  className="rounded border-gray-300 text-brand-red focus:ring-brand-red"
-                />
-                <label htmlFor="maintIsCleared" className="text-xs font-bold text-gray-700 uppercase">
-                  Clear Maintenance Shield (Ready for operations)
-                </label>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Checklist Notes
-                </label>
-                <textarea
-                  value={maintNotes}
-                  onChange={(e) => setMaintNotes(e.target.value)}
-                  placeholder="Notes from safety checks and compliance checklist..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white"
-                  rows={3}
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowMaintModal(false)}
-                  className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer"
-                >
-                  Sign Off Checklist
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showTerminateModal && terminateSessionTarget && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-200 p-6 rounded-lg shadow-xl max-w-md w-full space-y-4">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
-                Terminate Session Early
+      <AnimatePresence>
+        {showExternalUserModal && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white border border-gray-100 p-6 rounded shadow-2xl max-w-md w-full"
+            >
+              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+                Add External User
               </h3>
-              <button
-                type="button"
-                onClick={() => setShowTerminateModal(false)}
-                className="text-xs font-black text-gray-400 hover:text-brand-red uppercase"
-              >
-                Cancel
-              </button>
-            </div>
+              <form onSubmit={handleAddExternalUser} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    required
+                    value={externalFullName}
+                    onChange={(e) => setExternalFullName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Contact Email
+                  </label>
+                  <input
+                    type="email"
+                    value={externalEmail}
+                    onChange={(e) => setExternalEmail(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Contact Number
+                  </label>
+                  <input
+                    value={externalContactNumber}
+                    onChange={(e) => setExternalContactNumber(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Company Name
+                  </label>
+                  <input
+                    value={externalCompanyName}
+                    onChange={(e) => setExternalCompanyName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none"
+                  />
+                </div>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1">
-              <span className="font-black uppercase block text-amber-900">Warning</span>
-              <p>This will log the completed hours and instantly release the remaining schedule block.</p>
-            </div>
+                <AnimatePresence>
+                  {externalUserError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="border border-red-200 bg-red-50 rounded p-2 text-[10px] text-brand-red font-bold break-words overflow-hidden"
+                    >
+                      {externalUserError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-            <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
-              <div>
-                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
-                  Actual End Time
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={terminateActualEndHour}
-                    onChange={(e) => setTerminateActualEndHour(e.target.value)}
-                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowExternalUserModal(false)}
+                    className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50 active:scale-95 transition-all"
                   >
-                    {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
-                      <option key={hr} value={hr}>{hr}:00</option>
-                    ))}
-                  </select>
-                  <select
-                    value={terminateActualEndMin}
-                    onChange={(e) => setTerminateActualEndMin(e.target.value)}
-                    className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2"
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all shadow-md"
                   >
-                    {['00', '15', '30', '45'].map((min) => (
-                      <option key={min} value={min}>{min} min</option>
+                    Add User
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showAogModal && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white border border-gray-100 p-6 rounded shadow-2xl max-w-md w-full"
+            >
+              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+                Declare Simulator AOG (Down)
+              </h3>
+              <form onSubmit={handleTriggerAog} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Select Simulator
+                  </label>
+                  <select
+                    value={aogSimId}
+                    onChange={(e) => setAogSimId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900 transition-colors focus:border-brand-red focus:outline-none"
+                  >
+                    {simulators.map(s => (
+                      <option key={s.id} value={s.id}>{s.name} - {s.typeRating}</option>
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
-                  Termination Reason
-                </label>
-                <select
-                  value={terminateReason}
-                  onChange={(e) => setTerminateReason(e.target.value)}
-                  className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red"
-                >
-                  <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
-                  <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
-                  <option value="Operational Emergency">Operational Emergency</option>
-                  <option value="Weather / Environmental">Weather / Facility Failure</option>
-                </select>
-              </div>
-
-              {terminateError && (
-                <div className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded">
-                  {terminateError}
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Fault Description
+                  </label>
+                  <textarea
+                    required
+                    value={aogFault}
+                    onChange={(e) => setAogFault(e.target.value)}
+                    placeholder="Explain mechanical or software issues preventing operations..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none resize-none"
+                    rows={3}
+                  />
                 </div>
-              )}
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAogModal(false)}
+                    className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50 active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all shadow-md"
+                  >
+                    Trigger Shutdown
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-              <div className="flex gap-2 pt-2">
+      <AnimatePresence>
+        {showMaintModal && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white border border-gray-100 p-6 rounded shadow-2xl max-w-md w-full"
+            >
+              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+                Maintenance Shield Checklist Sign-Off
+              </h3>
+              <form onSubmit={handleSubmitMaint} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Select Simulator
+                  </label>
+                  <select
+                    value={maintSimId}
+                    onChange={(e) => setMaintSimId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold bg-white text-gray-900 transition-colors focus:border-brand-red focus:outline-none"
+                  >
+                    {simulators.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.typeRating})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="maintIsCleared"
+                    checked={maintIsCleared}
+                    onChange={(e) => setMaintIsCleared(e.target.checked)}
+                    className="rounded border-gray-300 text-brand-red focus:ring-brand-red cursor-pointer"
+                  />
+                  <label htmlFor="maintIsCleared" className="text-xs font-bold text-gray-700 uppercase cursor-pointer">
+                    Clear Maintenance Shield (Ready for operations)
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Checklist Notes
+                  </label>
+                  <textarea
+                    value={maintNotes}
+                    onChange={(e) => setMaintNotes(e.target.value)}
+                    placeholder="Notes from safety checks and compliance checklist..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-xs font-bold text-gray-900 bg-white transition-colors focus:border-brand-red focus:outline-none resize-none"
+                    rows={3}
+                  />
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowMaintModal(false)}
+                    className="px-4 py-2 border border-gray-200 rounded text-xs font-bold uppercase text-gray-600 hover:bg-gray-50 active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-brand-red hover:bg-red-700 text-white rounded text-xs font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all shadow-md"
+                  >
+                    Sign Off Checklist
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showTerminateModal && terminateSessionTarget && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white border border-gray-200 p-6 rounded-lg shadow-2xl max-w-md w-full space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
+                  Terminate Session Early
+                </h3>
                 <button
                   type="button"
                   onClick={() => setShowTerminateModal(false)}
-                  className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                  className="text-xs font-black text-gray-400 hover:text-brand-red uppercase active:scale-95 transition-all"
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-colors"
-                >
-                  Confirm Termination
-                </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1 shadow-sm">
+                <span className="font-black uppercase block text-amber-900">Warning</span>
+                <p>This will log the completed hours and instantly release the remaining schedule block.</p>
+              </div>
+
+              <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Actual End Time
+                  </label>
+                  <div className="flex gap-2">
+                    <select
+                      value={terminateActualEndHour}
+                      onChange={(e) => setTerminateActualEndHour(e.target.value)}
+                      className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2 transition-colors"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map((hr) => (
+                        <option key={hr} value={hr}>{hr}:00</option>
+                      ))}
+                    </select>
+                    <select
+                      value={terminateActualEndMin}
+                      onChange={(e) => setTerminateActualEndMin(e.target.value)}
+                      className="text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red w-1/2 transition-colors"
+                    >
+                      {['00', '15', '30', '45'].map((min) => (
+                        <option key={min} value={min}>{min} min</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Termination Reason
+                  </label>
+                  <select
+                    value={terminateReason}
+                    onChange={(e) => setTerminateReason(e.target.value)}
+                    className="w-full text-xs font-black text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red transition-colors"
+                  >
+                    <option value="Simulator AOG">Simulator AOG (Hardware Defect)</option>
+                    <option value="Pilot Illness">Pilot Illness / Medical Incapacity</option>
+                    <option value="Operational Emergency">Operational Emergency</option>
+                    <option value="Weather / Environmental">Weather / Facility Failure</option>
+                  </select>
+                </div>
+
+                <AnimatePresence>
+                  {terminateError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded overflow-hidden"
+                    >
+                      {terminateError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTerminateModal(false)}
+                    className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer active:scale-95 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-all active:scale-95 shadow-md"
+                  >
+                    Confirm Termination
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

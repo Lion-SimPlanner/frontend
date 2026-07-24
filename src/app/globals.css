@@ -9,10 +9,13 @@
   --color-aviation-red: #fc0404;
   --color-brand-red: #fc0404;
   --color-border-gray: #e5e7eb;
+
+  --font-sans: var(--font-titillium-web), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background-color: #ffffff !important;
   color: #111111;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
 }
