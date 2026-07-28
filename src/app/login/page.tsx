@@ -142,7 +142,7 @@ export default function LoginPage() {
 
             <div className="flex items-center justify-between">
               <span className="text-[9px] text-gray-400 font-black uppercase tracking-wider">
-                Default: admin@lionair.co.id / admin123
+                Default: password (e.g. admin@lionair.co.id / password)
               </span>
               <a
                 href="#"

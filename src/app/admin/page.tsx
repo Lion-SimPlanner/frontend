@@ -19,6 +19,7 @@ import {
   startSession,
   setSimulatorStatus,
   submitMaintenanceChecklist,
+  getDefectReports,
   PilotPriority,
   Instructor,
   Engineer,
@@ -26,6 +27,8 @@ import {
   SimulatorSession
 } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
+import TimeDebtQueue from '@/components/admin/TimeDebtQueue';
+import GradeSummaryModal from '@/components/shared/GradeSummaryModal';
 
 const listContainer: Variants = {
   hidden: { opacity: 0 },
@@ -86,10 +89,27 @@ const formatLocalTimestamp = (value?: string) => {
   });
 };
 
+const isTypeCompatible = (simType?: string, list?: string[]) => {
+  if (!simType || !list || list.length === 0) return false;
+  const cleanSim = simType.toUpperCase().replace(/\s+/g, '');
+  return list.some(item => {
+    const cleanItem = item.toUpperCase().replace(/\s+/g, '');
+    return cleanSim.includes(cleanItem) || cleanItem.includes(cleanSim) || cleanSim.split('-')[0] === cleanItem.split('-')[0];
+  });
+};
+
 const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
 
 const addLocalDays = (value: Date, days: number) =>
   new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+
+const getStartOfLocalWeek = (value: Date) => {
+  const dt = startOfLocalDay(value);
+  const day = dt.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  dt.setDate(dt.getDate() + diff);
+  return dt;
+};
 
 const toLocalDateKey = (value: Date) => {
   const y = value.getFullYear();
@@ -222,7 +242,7 @@ export default function AdminPage() {
   const [editEndMin, setEditEndMin] = useState('00');
   const [rescheduleViolations, setRescheduleViolations] = useState<string[]>([]);
 
-  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
+  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => getStartOfLocalWeek(new Date()));
   const [sessionDateKey, setSessionDateKey] = useState<string>(() => toLocalDateKey(startOfLocalDay(new Date())));
   const [sessionStartHour, setSessionStartHour] = useState<string>('08');
   const [sessionStartMin, setSessionStartMin] = useState<string>('00');
@@ -233,8 +253,8 @@ export default function AdminPage() {
   const [selectedSimId, setSelectedSimId] = useState('');
   const [selectedSessionType, setSelectedSessionType] = useState('InitialTypeRating');
 
-  const [assignedCaptain, setAssignedCaptain] = useState<PilotPriority | null>(null);
-  const [assignedFO, setAssignedFO] = useState<PilotPriority | null>(null);
+  const [assignedTrainee, setAssignedTrainee] = useState<PilotPriority | null>(null);
+  const [assignedTraineeRole, setAssignedTraineeRole] = useState<'Captain' | 'First Officer'>('Captain');
   const [assignedInstructor, setAssignedInstructor] = useState<Instructor | null>(null);
 
   const [validationViolations, setValidationViolations] = useState<string[]>([]);
@@ -257,11 +277,14 @@ export default function AdminPage() {
   const [externalUserError, setExternalUserError] = useState<string | null>(null);
 
   const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [lockedSimIds, setLockedSimIds] = useState<Set<string>>(new Set());
   const [terminateSessionTarget, setTerminateSessionTarget] = useState<SimulatorSession | null>(null);
   const [terminateReason, setTerminateReason] = useState('Simulator AOG');
   const [terminateActualEndHour, setTerminateActualEndHour] = useState('10');
   const [terminateActualEndMin, setTerminateActualEndMin] = useState('00');
   const [terminateError, setTerminateError] = useState<string | null>(null);
+  const [showGradeModal, setShowGradeModal] = useState(false);
+  const [gradeModalSession, setGradeModalSession] = useState<SimulatorSession | null>(null);
 
   const handleOpenTerminateModal = (session: SimulatorSession) => {
     const now = new Date();
@@ -317,6 +340,33 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<'Dashboard' | 'Engineers' | 'Instructors'>('Dashboard');
   const [selectedHwSimId, setSelectedHwSimId] = useState<string>('');
 
+  const selectedSim = simulators.find((sim) => sim.id === selectedSimId);
+  const selectedSimTypeRating = selectedSim?.typeRating ?? '';
+
+  const filteredPilots = pilots.filter((p) => {
+    const matchesSearch =
+      p.fullName.toLowerCase().includes(pilotSearch.toLowerCase()) ||
+      p.employeeCode.toLowerCase().includes(pilotSearch.toLowerCase());
+    const matchesRating =
+      selectedRatingFilter === 'ALL' ||
+      (p.typeRatings ?? []).some((r) => r.toUpperCase() === selectedRatingFilter.toUpperCase());
+    return matchesSearch && matchesRating;
+  });
+
+  const eligiblePilots = selectedSimId
+    ? filteredPilots.filter(p => isTypeCompatible(selectedSimTypeRating, p.typeRatings))
+    : [];
+
+  const eligibleInstructors = selectedSimId
+    ? instructors.filter(i => isTypeCompatible(selectedSimTypeRating, i.certifiedTypes ?? i.typeRatings ?? i.ratings))
+    : [];
+
+  const handleSimulatorChange = (simId: string) => {
+    setSelectedSimId(simId);
+    setAssignedTrainee(null);
+    setAssignedInstructor(null);
+  };
+
   const selectedHwSim = simulators.find((sim) => sim.id === selectedHwSimId) ?? simulators[0] ?? null;
 
   useEffect(() => {
@@ -355,18 +405,26 @@ export default function AdminPage() {
 
   const loadData = async () => {
     try {
-      const pilotsData = await getPilotsPriorityQueue();
-      const instData = await getInstructors();
-      const engData = await getEngineers();
-      const simsData = await getSimulators();
-      const sessData = await getSessions();
+      const [pilotsData, instData, engData, simsData, sessData, defectsData] = await Promise.all([
+        getPilotsPriorityQueue(),
+        getInstructors(),
+        getEngineers(),
+        getSimulators(),
+        getSessions(),
+        getDefectReports(),
+      ]);
+
+      const locked = new Set<string>();
+      defectsData.filter((d) => d.severity === 'AOG' && d.status !== 'Resolved').forEach((d) => locked.add(d.simulatorId));
+      simsData.filter((s) => s.status === 'AOG' || s.status === 'Down').forEach((s) => locked.add(s.id));
+      setLockedSimIds(locked);
 
       setPilots(pilotsData);
       setInstructors(instData);
       setEngineers(engData);
       setSimulators(simsData);
       setSessions(sessData);
-      setSelectedSimId(prev => (prev === '' && simsData.length > 0) ? simsData[0].id : prev);
+      setSelectedSimId((prev) => (prev === '' && simsData.length > 0) ? simsData[0].id : prev);
     } catch (err) {
       console.error(err);
     }
@@ -418,17 +476,23 @@ export default function AdminPage() {
   useEffect(() => {
     if (!selectedSlot) return;
     const violations: string[] = [];
-    if (!assignedCaptain) {
-      violations.push('No Captain assigned. Dual-crew simulator sessions require an PIC/Captain.');
-    }
-    if (!assignedFO && selectedSessionType !== 'SinglePilotCRM') {
-      violations.push('No First Officer assigned. Dual-crew sessions require an FO.');
-    }
-    if (!assignedInstructor) {
-      violations.push('No Instructor assigned. Qualified Instructor is required for regulatory grading.');
+    if (!selectedSimId) {
+      violations.push('No Simulator selected. Step 1: Select a Simulator first to enable crew assignment.');
+    } else {
+      if (!assignedTrainee) {
+        violations.push(`No Trainee assigned. Select an eligible Trainee qualified for ${selectedSim?.name ?? 'Simulator'} (${selectedSimTypeRating}).`);
+      } else if (!isTypeCompatible(selectedSimTypeRating, assignedTrainee.typeRatings)) {
+        violations.push(`Certification Mismatch: Trainee ${assignedTrainee.fullName} is not qualified for ${selectedSimTypeRating}.`);
+      }
+
+      if (!assignedInstructor) {
+        violations.push(`No Instructor assigned. Select an eligible Instructor certified for ${selectedSim?.name ?? 'Simulator'} (${selectedSimTypeRating}).`);
+      } else if (!isTypeCompatible(selectedSimTypeRating, assignedInstructor.certifiedTypes ?? assignedInstructor.typeRatings ?? assignedInstructor.ratings)) {
+        violations.push(`Certification Mismatch: Instructor ${assignedInstructor.name} is not certified for ${selectedSimTypeRating}.`);
+      }
     }
     setValidationViolations(violations);
-  }, [assignedCaptain, assignedFO, assignedInstructor, selectedSimId, selectedSessionType, simulators, selectedSlot]);
+  }, [assignedTrainee, assignedTraineeRole, assignedInstructor, selectedSimId, selectedSessionType, simulators, selectedSlot, selectedSimTypeRating]);
 
   const handleCellClick = (dayKey: string, hour: number) => {
     const isOccupied = sessions.some(s => {
@@ -455,8 +519,9 @@ export default function AdminPage() {
     setSessionEndHour(endHourNum.toString().padStart(2, '0'));
     setSessionEndMin('00');
 
-    setAssignedCaptain(null);
-    setAssignedFO(null);
+    setSelectedSimId('');
+    setAssignedTrainee(null);
+    setAssignedTraineeRole('Captain');
     setAssignedInstructor(null);
   };
 
@@ -492,28 +557,22 @@ export default function AdminPage() {
   };
 
   const handleAssignCrew = (p: PilotPriority) => {
-    if (!selectedSlot) return;
-    if (p.isExternalUser) {
-      if (!assignedCaptain) {
-        setAssignedCaptain(p);
-        return;
-      }
-      if (!assignedFO && selectedSessionType !== 'SinglePilotCRM') {
-        setAssignedFO(p);
-        return;
-      }
-      setAssignedCaptain(p);
+    if (!selectedSlot || !selectedSimId) return;
+    if (!isTypeCompatible(selectedSimTypeRating, p.typeRatings)) {
+      alert(`Cannot assign ${p.fullName}. Trainee is not qualified for ${selectedSimTypeRating}.`);
       return;
     }
-    if (p.rank === 'Captain') {
-      setAssignedCaptain(p);
-    } else {
-      setAssignedFO(p);
-    }
+    const role: 'Captain' | 'First Officer' = p.rank === 'Captain' ? 'Captain' : 'First Officer';
+    setAssignedTrainee(p);
+    setAssignedTraineeRole(role);
   };
 
   const handleAssignInstructor = (i: Instructor) => {
-    if (!selectedSlot) return;
+    if (!selectedSlot || !selectedSimId) return;
+    if (!isTypeCompatible(selectedSimTypeRating, i.certifiedTypes ?? i.typeRatings ?? i.ratings)) {
+      alert(`Cannot assign ${i.name}. Instructor is not certified for ${selectedSimTypeRating}.`);
+      return;
+    }
     setAssignedInstructor(i);
   };
 
@@ -603,8 +662,8 @@ export default function AdminPage() {
     if (!selectedSimId) {
       preflightErrors.push('No Simulator selected. Select a valid simulator from the dropdown before publishing.');
     }
-    if (!assignedCaptain) {
-      preflightErrors.push('No Captain assigned. Dual-crew simulator sessions require a PIC/Captain.');
+    if (!assignedTrainee) {
+      preflightErrors.push('No Trainee assigned. Each session requires one Trainee (Captain or First Officer).');
     }
     if (!assignedInstructor) {
       preflightErrors.push('No Instructor assigned. A qualified Instructor is required for regulatory grading.');
@@ -625,20 +684,19 @@ export default function AdminPage() {
       parseInt(sessionEndMin, 10)
     ).toISOString();
 
-    const syllabusId = assignedCaptain!.requiredSyllabus
-      || `${selectedSessionType.replace(/\s+/g, '_').toUpperCase()}_CUSTOM`;
+    const syllabusId = `${selectedSimTypeRating}_${assignedTrainee!.requiredSyllabus || selectedSessionType.replace(/\s+/g, '')}`;
 
     const payload = {
       simulatorId: selectedSimId,
       sessionType: selectedSessionType,
       startTime,
       endTime,
-      captainId: assignedCaptain?.pilotId ?? undefined,
-      firstOfficerId: assignedFO?.pilotId ?? undefined,
+      traineeId: assignedTrainee?.pilotId ?? undefined,
+      traineeRole: assignedTraineeRole,
       instructorId: assignedInstructor?.id ?? undefined,
       engineerId: undefined,
       syllabusId,
-      traineeEmployeeCode: assignedCaptain!.employeeCode,
+      traineeEmployeeCode: assignedTrainee!.employeeCode,
     };
 
     try {
@@ -646,8 +704,8 @@ export default function AdminPage() {
       const publishResult = await publishSession(sessResult.sessionId);
       setPublishSuccess(publishResult.message);
 
-      setAssignedCaptain(null);
-      setAssignedFO(null);
+      setAssignedTrainee(null);
+      setAssignedTraineeRole('Captain');
       setAssignedInstructor(null);
       setSelectedSlot(null);
 
@@ -741,13 +799,7 @@ export default function AdminPage() {
     );
   }
 
-  const filteredPilots = pilots.filter(p => {
-    const matchesSearch = p.fullName.toLowerCase().includes(pilotSearch.toLowerCase()) || p.employeeCode.toLowerCase().includes(pilotSearch.toLowerCase());
-    const matchesRating = selectedRatingFilter === 'ALL' || p.typeRatings.includes(selectedRatingFilter);
-    return matchesSearch && matchesRating;
-  });
-
-  const visibleDayCount = 14;
+  const visibleDayCount = 7;
   const visibleDays = Array.from({ length: visibleDayCount }, (_, idx) => addLocalDays(calendarStartDate, idx));
   const calendarRangeLabel = formatCalendarRange(calendarStartDate, visibleDayCount);
 
@@ -768,7 +820,7 @@ export default function AdminPage() {
   };
 
   const goToTodayWindow = () => {
-    setCalendarStartDate(startOfLocalDay(new Date()));
+    setCalendarStartDate(getStartOfLocalWeek(new Date()));
     setSelectedSlot(null);
     setViewedSession(null);
     setIsRescheduleMode(false);
@@ -823,7 +875,7 @@ export default function AdminPage() {
         </div>
 
         <nav className="flex items-center gap-6 px-4">
-          {(['Dashboard', 'Engineers', 'Instructors'] as const).map(tab => (
+          {(['Dashboard', 'Engineers'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -913,8 +965,8 @@ export default function AdminPage() {
                     key={sim.id}
                     onClick={() => setSelectedHwSimId(sim.id)}
                     className={`w-full text-left p-4 border rounded transition-all duration-200 active:scale-[0.98] ${selectedHwSimId === sim.id
-                        ? 'border-brand-red bg-red-50 shadow-sm scale-[1.02]'
-                        : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 hover:scale-[1.02]'
+                      ? 'border-brand-red bg-red-50 shadow-sm scale-[1.02]'
+                      : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 hover:scale-[1.02]'
                       }`}
                   >
                     <div className="flex items-start justify-between gap-2 min-w-0">
@@ -982,12 +1034,12 @@ export default function AdminPage() {
                             <span className="font-bold text-gray-800 truncate">{c.label}</span>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className={`font-black transition-colors ${c.state === 'err' ? 'text-brand-red'
-                                  : c.state === 'warn' ? 'text-orange-500'
-                                    : 'text-green-600'
+                                : c.state === 'warn' ? 'text-orange-500'
+                                  : 'text-green-600'
                                 }`}>{c.value}</span>
                               <span className={`w-2 h-2 rounded-full transition-colors ${c.state === 'err' ? 'bg-brand-red shadow-[0_0_8px_rgba(239,68,68,0.6)]'
-                                  : c.state === 'warn' ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]'
-                                    : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+                                : c.state === 'warn' ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]'
+                                  : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]'
                                 }`} />
                             </div>
                           </motion.div>
@@ -1016,70 +1068,6 @@ export default function AdminPage() {
         </motion.div>
       )}
 
-      {activeTab === 'Instructors' && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex-1 overflow-auto bg-white p-6 w-full min-w-0"
-        >
-          <div className="mb-5 flex items-center justify-between gap-4 min-w-0">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-black uppercase text-gray-955 tracking-wider truncate">Pilot Training Grades</h2>
-              <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">All completed simulator sessions graded by instructors</p>
-            </div>
-            <span className="bg-brand-red text-white text-[9px] font-black px-2.5 py-1 rounded uppercase tracking-wider shrink-0 transition-transform hover:scale-105">
-              {mockPilotGrades.length} Records
-            </span>
-          </div>
-
-          <div className="border border-gray-200 rounded shadow-sm overflow-x-auto max-w-full">
-            <table className="w-full text-xs min-w-[1000px]">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Pilot', 'Emp Code', 'Rank', 'Date', 'Session', 'Tech', 'CRM', 'SOP', 'Overall', 'Instructor', 'Notes'].map(h => (
-                    <th key={h} className="px-3 py-3 text-left text-[9px] font-black uppercase tracking-wider text-gray-500 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <motion.tbody
-                variants={listContainer}
-                initial="hidden"
-                animate="show"
-                className="divide-y divide-gray-100"
-              >
-                {mockPilotGrades.map((g, i) => (
-                  <motion.tr
-                    variants={listItem}
-                    key={i}
-                    className="bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    <td className="px-3 py-3 font-black text-gray-900 whitespace-nowrap">{g.pilot}</td>
-                    <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.empCode}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none transition-colors ${g.rank === 'Captain' ? 'bg-blue-50 text-blue-600 border border-blue-300' : 'bg-gray-50 text-gray-500 border border-gray-300'
-                        }`}>{g.rank}</span>
-                    </td>
-                    <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.date}</td>
-                    <td className="px-3 py-3 font-bold text-gray-800 max-w-[160px] truncate" title={g.session}>{g.session}</td>
-                    <td className="px-3 py-3 font-black text-center text-gray-900">{g.techSkills}</td>
-                    <td className="px-3 py-3 font-black text-center text-gray-900">{g.crm}</td>
-                    <td className="px-3 py-3 font-black text-center text-gray-900">{g.sop}</td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase leading-none border transition-colors ${g.overall === 'Excellent' ? 'bg-green-50 text-green-600 border-green-400'
-                          : g.overall === 'Unsatisfactory' ? 'bg-red-50 text-brand-red border-brand-red'
-                            : 'bg-blue-50 text-blue-600 border-blue-300'
-                        }`}>{g.overall}</span>
-                    </td>
-                    <td className="px-3 py-3 font-bold text-gray-500 whitespace-nowrap">{g.instructor}</td>
-                    <td className="px-3 py-3 font-bold text-gray-400 max-w-[200px] truncate" title={g.notes}>{g.notes}</td>
-                  </motion.tr>
-                ))}
-              </motion.tbody>
-            </table>
-          </div>
-        </motion.div>
-      )}
-
       {activeTab === 'Dashboard' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -1087,6 +1075,19 @@ export default function AdminPage() {
           className="flex-1 flex overflow-hidden bg-white w-full"
         >
           <div className="flex-initial w-80 h-full overflow-y-auto border-r border-gray-200 p-4 space-y-6 min-w-0 shrink-0">
+            <TimeDebtQueue
+              sessions={sessions}
+              pilots={pilots}
+              selectedSimId={selectedSimId}
+              selectedSlot={selectedSlot}
+              onSelectPilotForMakeup={(pilot) => {
+                if (!selectedSlot) {
+                  alert('Select an open slot on the 14-day schedule first to book a makeup session.');
+                  return;
+                }
+                handleAssignCrew(pilot);
+              }}
+            />
             <div className="min-w-0">
               <div className="flex items-center justify-between mb-3 gap-2">
                 <h3 className="text-xs font-black tracking-widest uppercase text-gray-955 truncate">
@@ -1116,13 +1117,13 @@ export default function AdminPage() {
                   className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs font-bold text-gray-900 focus:outline-none focus:border-brand-red bg-white transition-colors"
                 />
                 <div className="flex flex-wrap gap-1">
-                  {['ALL', 'B737-800NG', 'B737-900ER', 'B737 MAX 8', 'A320-200', 'A320neo', 'A330-300', 'A330-900neo', 'ATR 72-500', 'ATR 72-600'].map(rating => (
+                  {['ALL', 'B737-800NG', 'B737 MAX 8', 'A320-200', 'A320neo', 'A330-300', 'ATR 72-600'].map(rating => (
                     <button
                       key={rating}
                       onClick={() => setSelectedRatingFilter(rating)}
                       className={`px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wider rounded border shrink-0 transition-all active:scale-95 ${selectedRatingFilter === rating
-                          ? 'bg-brand-red text-white border-brand-red scale-105'
-                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        ? 'bg-brand-red text-white border-brand-red scale-105'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                         }`}
                     >
                       {rating}
@@ -1198,12 +1199,39 @@ export default function AdminPage() {
                             ))}
                           </div>
                           {selectedSlot && (
-                            <button
-                              onClick={() => handleAssignCrew(p)}
-                              className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-2 py-1 rounded cursor-pointer leading-none shrink-0 transition-transform"
-                            >
-                              Assign
-                            </button>
+                            (() => {
+                              if (!selectedSimId) {
+                                return (
+                                  <button
+                                    disabled
+                                    title="Select a simulator first"
+                                    className="bg-gray-100 text-gray-400 border border-gray-200 text-[8px] font-black uppercase px-1.5 py-1 rounded cursor-not-allowed leading-none shrink-0 opacity-60"
+                                  >
+                                    Select Sim First
+                                  </button>
+                                );
+                              }
+                              const isComp = isTypeCompatible(selectedSimTypeRating, p.typeRatings);
+                              if (!isComp) {
+                                return (
+                                  <button
+                                    disabled
+                                    title={`Incompatible with ${selectedSimTypeRating}`}
+                                    className="bg-gray-100 text-gray-400 border border-gray-200 text-[8px] font-black uppercase px-1.5 py-1 rounded cursor-not-allowed leading-none shrink-0 opacity-50"
+                                  >
+                                    Incompatible
+                                  </button>
+                                );
+                              }
+                              return (
+                                <button
+                                  onClick={() => handleAssignCrew(p)}
+                                  className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-2 py-1 rounded cursor-pointer leading-none shrink-0 transition-transform shadow-sm"
+                                >
+                                  Assign
+                                </button>
+                              );
+                            })()
                           )}
                         </div>
                       </motion.div>
@@ -1271,12 +1299,39 @@ export default function AdminPage() {
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {selectedSlot && (
-                        <button
-                          onClick={() => handleAssignInstructor(i)}
-                          className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-1 py-0.5 rounded cursor-pointer leading-none shrink-0 transition-transform"
-                        >
-                          Assign
-                        </button>
+                        (() => {
+                          if (!selectedSimId) {
+                            return (
+                              <button
+                                disabled
+                                title="Select a simulator first"
+                                className="bg-gray-100 text-gray-400 border border-gray-200 text-[8px] font-black uppercase px-1.5 py-0.5 rounded cursor-not-allowed leading-none shrink-0 opacity-60"
+                              >
+                                Select Sim First
+                              </button>
+                            );
+                          }
+                          const isComp = isTypeCompatible(selectedSimTypeRating, i.certifiedTypes ?? i.typeRatings ?? i.ratings);
+                          if (!isComp) {
+                            return (
+                              <button
+                                disabled
+                                title={`Incompatible with ${selectedSimTypeRating}`}
+                                className="bg-gray-100 text-gray-400 border border-gray-200 text-[8px] font-black uppercase px-1.5 py-0.5 rounded cursor-not-allowed leading-none shrink-0 opacity-50"
+                              >
+                                Incompatible
+                              </button>
+                            );
+                          }
+                          return (
+                            <button
+                              onClick={() => handleAssignInstructor(i)}
+                              className="bg-brand-red hover:bg-red-700 active:scale-90 text-white text-[8px] font-black uppercase px-1 py-0.5 rounded cursor-pointer leading-none shrink-0 transition-transform shadow-sm"
+                            >
+                              Assign
+                            </button>
+                          );
+                        })()
                       )}
                     </div>
                   </motion.div>
@@ -1354,7 +1409,7 @@ export default function AdminPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
                   <div className="min-w-0 flex-1">
                     <h3 className="text-sm font-black uppercase text-gray-900 truncate">
-                      14-Day Schedule Grid
+                      7-Day Schedule Grid
                     </h3>
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate">
                       {calendarRangeLabel} • Click empty cell to build • Click session to view crew
@@ -1365,7 +1420,7 @@ export default function AdminPage() {
                       onClick={goToPreviousWindow}
                       className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
                     >
-                      Prev 14d
+                      Prev Week
                     </button>
                     <button
                       onClick={goToTodayWindow}
@@ -1377,7 +1432,7 @@ export default function AdminPage() {
                       onClick={goToNextWindow}
                       className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
                     >
-                      Next 14d
+                      Next Week
                     </button>
                   </div>
                 </div>
@@ -1436,8 +1491,8 @@ export default function AdminPage() {
                                 key={dayKey}
                                 onClick={() => handleCellClick(dayKey, hour)}
                                 className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors duration-200 min-w-0 ${isSelectedDraft
-                                    ? 'bg-red-50/50'
-                                    : 'bg-white hover:bg-gray-50 cursor-pointer'
+                                  ? 'bg-red-50/50'
+                                  : 'bg-white hover:bg-gray-50 cursor-pointer'
                                   }`}
                               >
                                 {engineerCovered && (
@@ -1460,7 +1515,7 @@ export default function AdminPage() {
                                       <div className="min-w-0">
                                         <div className="uppercase font-extrabold tracking-wide">DRAFT</div>
                                         <div className="truncate opacity-95">
-                                          {assignedCaptain ? assignedCaptain.fullName : 'No Captain'}
+                                          {assignedTrainee ? assignedTrainee.fullName : 'No Trainee'}
                                         </div>
                                       </div>
                                       <div className="uppercase tracking-widest text-[7px] truncate opacity-90">
@@ -1476,7 +1531,6 @@ export default function AdminPage() {
                                   const duration = getDurationInHours(s.startTime, s.endTime);
                                   const heightPx = (duration * 56) - 4;
                                   const topOffsetPx = Math.round((start.getMinutes() / 60) * 56) + 2;
-                                  const isSpecial = s.sessionType === 'InitialTypeRating' || s.sessionType === 'OPC';
 
                                   return (
                                     <motion.div
@@ -1496,15 +1550,25 @@ export default function AdminPage() {
                                         setIsRescheduleMode(false);
                                         setRescheduleViolations([]);
                                       }}
-                                      className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 transition-transform active:scale-95 shadow-sm hover:shadow-md hover:z-30 ${isSpecial
-                                          ? 'bg-brand-red text-white border-brand-red hover:bg-red-800'
-                                          : 'bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-200'
+                                      className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black text-white rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 transition-transform active:scale-95 shadow-sm hover:shadow-md hover:z-30 ${viewedSession?.sessionId === s.sessionId
+                                        ? 'bg-brand-red border-red-800 font-black z-30'
+                                        : s.status === 'Scheduled' || s.status === 'Draft'
+                                          ? 'bg-blue-500 hover:bg-blue-600 border-blue-700 font-bold'
+                                          : s.status === 'InProgress'
+                                            ? 'bg-green-600 hover:bg-green-700 border-green-800 font-bold animate-pulse'
+                                            : s.status === 'Completed'
+                                              ? 'bg-teal-600 hover:bg-teal-700 border-teal-800 font-bold'
+                                              : s.status === 'TerminatedEarly'
+                                                ? 'bg-purple-600 hover:bg-purple-700 border-purple-800 font-bold'
+                                                : s.status === 'Cancelled'
+                                                  ? 'bg-gray-300 hover:bg-gray-400 border-gray-400 opacity-70 font-medium'
+                                                  : 'bg-blue-500 hover:bg-blue-600 border-blue-700 font-medium'
                                         }`}
                                     >
                                       <div className="min-w-0">
                                         <div className="uppercase truncate">{s.sessionType}</div>
                                         <div className="truncate opacity-95">
-                                          {pilots.find(p => p.pilotId === s.captainId)?.fullName || 'No Pilot'}
+                                          {s.traineeName || s.traineeEmployeeCode || pilots.find(p => p.employeeCode === s.traineeEmployeeCode)?.fullName || 'No Trainee'}
                                         </div>
                                       </div>
                                       <div className="uppercase tracking-widest text-[7px] truncate opacity-90 flex items-center justify-between gap-1 min-w-0">
@@ -1599,14 +1663,14 @@ export default function AdminPage() {
                         <motion.span
                           layout
                           className={`px-2 py-0.5 border text-[9px] font-black rounded uppercase inline-block transition-colors ${viewedSession.status === 'Completed'
-                              ? 'bg-green-50 text-green-700 border-green-400'
-                              : viewedSession.status === 'InProgress'
-                                ? 'bg-amber-50 text-amber-700 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
-                                : viewedSession.status === 'TerminatedEarly'
-                                  ? 'bg-purple-50 text-purple-700 border-purple-400'
-                                  : viewedSession.status === 'Cancelled'
-                                    ? 'bg-red-50 text-brand-red border-brand-red'
-                                    : 'bg-blue-50 text-blue-700 border-blue-400'
+                            ? 'bg-green-50 text-green-700 border-green-400'
+                            : viewedSession.status === 'InProgress'
+                              ? 'bg-amber-50 text-amber-700 border-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.5)]'
+                              : viewedSession.status === 'TerminatedEarly'
+                                ? 'bg-purple-50 text-purple-700 border-purple-400'
+                                : viewedSession.status === 'Cancelled'
+                                  ? 'bg-red-50 text-brand-red border-brand-red'
+                                  : 'bg-blue-50 text-blue-700 border-blue-400'
                             }`}
                         >
                           {viewedSession.status}
@@ -1720,25 +1784,13 @@ export default function AdminPage() {
 
                         <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0 transition-colors hover:bg-gray-100">
                           <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
-                            C
+                            T
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="font-black text-gray-900 text-xs truncate">
-                              {pilots.find(p => p.pilotId === viewedSession.captainId)?.fullName || 'Unassigned'}
+                              {viewedSession.traineeName || viewedSession.traineeEmployeeCode || 'Unassigned'}
                             </div>
-                            <div className="text-[8px] text-gray-400 uppercase">Captain</div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 p-1.5 bg-gray-50 border border-gray-100 rounded min-w-0 transition-colors hover:bg-gray-100">
-                          <div className="w-6 h-6 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-[10px] shrink-0">
-                            F
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="font-black text-gray-900 text-xs truncate">
-                              {pilots.find(p => p.pilotId === viewedSession.firstOfficerId)?.fullName || 'Unassigned'}
-                            </div>
-                            <div className="text-[8px] text-gray-400 uppercase">First Officer</div>
+                            <div className="text-[8px] text-gray-400 uppercase">Trainee · {viewedSession.traineeRole || '—'}</div>
                           </div>
                         </div>
 
@@ -1794,6 +1846,20 @@ export default function AdminPage() {
                       )}
                     </AnimatePresence>
 
+                    {viewedSession.status === 'Completed' && (
+                      <button
+                        onClick={() => {
+                          setGradeModalSession(viewedSession);
+                          setShowGradeModal(true);
+                        }}
+                        className="w-full bg-teal-600 hover:bg-teal-700 active:scale-95 text-white font-black py-2 rounded text-xs uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                        </svg>
+                        View Grade Report
+                      </button>
+                    )}
                     {user.role === 'Admin' && (
                       <button
                         onClick={() => handleCancelSession(viewedSession.sessionId)}
@@ -1864,131 +1930,156 @@ export default function AdminPage() {
                             ))}
                           </select>
                         </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                          Simulator
-                        </label>
-                        <select
-                          value={selectedSimId}
-                          onChange={(e) => setSelectedSimId(e.target.value)}
-                          className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
-                        >
-                          {simulators.map(s => (
-                            <option key={s.id} value={s.id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
-                          Type
-                        </label>
-                        <select
-                          value={selectedSessionType}
-                          onChange={(e) => setSelectedSessionType(e.target.value)}
-                          className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
-                        >
-                          <option value="Recurrent">Recurrent Training</option>
-                          <option value="OPC">Operator Proficiency Check (OPC)</option>
-                          <option value="LPC">License Proficiency Check (LPC)</option>
-                          <option value="InitialTypeRating">Initial Type Rating</option>
-                          <option value="CommandUpgrade">Command Upgrade Training</option>
-                          <option value="Differences">Differences / Familiarization</option>
-                          <option value="Requalification">Requalification Training</option>
-                          <option value="LOFT">Line-Oriented Flight Training (LOFT)</option>
-                          <option value="SinglePilotCRM">Single-Pilot CRM</option>
-                          <option value="MCC">Multi-Crew Cooperation (MCC)</option>
-                        </select>
-                      </div>
-
-                      <AnimatePresence>
-                        {selectedSimulatorIsAog && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider overflow-hidden"
+                        <div>
+                          <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                            Simulator
+                          </label>
+                          <select
+                            value={selectedSimId}
+                            onChange={(e) => handleSimulatorChange(e.target.value)}
+                            className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1.5 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
                           >
-                            Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-
-                      <div className="space-y-3 pt-1 min-w-0">
-                        <div className="min-w-0">
-                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Captain Zone</span>
-                          <AnimatePresence mode="popLayout">
-                            {assignedCaptain ? (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
-                              >
-                                <span className="font-black text-gray-900 truncate flex-1">{assignedCaptain.fullName}</span>
-                                <button onClick={() => setAssignedCaptain(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
-                              </motion.div>
-                            ) : (
-                              <motion.div
-                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
-                              >
-                                Select Captain Card
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                            <option value="">-- Select a Simulator --</option>
+                            {simulators.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name} ({s.typeRating}) - {s.status}</option>
+                            ))}
+                          </select>
                         </div>
 
-                        <div className="min-w-0">
-                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">First Officer Zone</span>
-                          <AnimatePresence mode="popLayout">
-                            {assignedFO ? (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
-                              >
-                                <span className="font-black text-gray-900 truncate flex-1">{assignedFO.fullName}</span>
-                                <button onClick={() => setAssignedFO(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
-                              </motion.div>
-                            ) : (
-                              <motion.div
-                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
-                              >
-                                Select First Officer Card
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
+                        <div>
+                          <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
+                            Type
+                          </label>
+                          <select
+                            value={selectedSessionType}
+                            onChange={(e) => setSelectedSessionType(e.target.value)}
+                            className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
+                          >
+                            <option value="Recurrent">Recurrent Training</option>
+                            <option value="OPC">Operator Proficiency Check (OPC)</option>
+                            <option value="LPC">License Proficiency Check (LPC)</option>
+                            <option value="InitialTypeRating">Initial Type Rating</option>
+                            <option value="CommandUpgrade">Command Upgrade Training</option>
+                            <option value="Differences">Differences / Familiarization</option>
+                            <option value="Requalification">Requalification Training</option>
+                            <option value="LOFT">Line-Oriented Flight Training (LOFT)</option>
+                            <option value="SinglePilotCRM">Single-Pilot CRM</option>
+                            <option value="MCC">Multi-Crew Cooperation (MCC)</option>
+                          </select>
                         </div>
 
-                        <div className="min-w-0">
-                          <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Instructor Zone</span>
-                          <AnimatePresence mode="popLayout">
-                            {assignedInstructor ? (
-                              <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
-                              >
-                                <span className="font-black text-gray-900 truncate flex-1">{assignedInstructor.name}</span>
-                                <button onClick={() => setAssignedInstructor(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
-                              </motion.div>
+                        <AnimatePresence>
+                          {selectedSimulatorIsAog && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider overflow-hidden"
+                            >
+                              Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        <div className="space-y-3 pt-1 min-w-0">
+                          <div className="min-w-0">
+                            <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Trainee Zone</span>
+                            {!selectedSimId ? (
+                              <div className="border border-dashed border-gray-300 rounded p-2.5 text-center text-[9px] font-bold text-gray-400 bg-gray-100 uppercase tracking-wider opacity-60">
+                                Select a simulator first...
+                              </div>
+                            ) : eligiblePilots.length === 0 ? (
+                              <div className="border border-red-200 rounded p-2.5 text-center text-[9px] font-bold text-brand-red bg-red-50 uppercase tracking-wider">
+                                No eligible trainees found for {selectedSimTypeRating}
+                              </div>
                             ) : (
-                              <motion.div
-                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
-                              >
-                                Select Instructor Card
-                              </motion.div>
+                              <div>
+                                <div className="mb-2">
+                                  <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Trainee Role</label>
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setAssignedTraineeRole('Captain')}
+                                      className={`flex-1 py-1 text-[9px] font-black uppercase rounded border transition-colors cursor-pointer ${assignedTraineeRole === 'Captain'
+                                        ? 'bg-brand-red text-white border-brand-red'
+                                        : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
+                                        }`}
+                                    >
+                                      Captain
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setAssignedTraineeRole('First Officer')}
+                                      className={`flex-1 py-1 text-[9px] font-black uppercase rounded border transition-colors cursor-pointer ${assignedTraineeRole === 'First Officer'
+                                        ? 'bg-brand-red text-white border-brand-red'
+                                        : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
+                                        }`}
+                                    >
+                                      First Officer
+                                    </button>
+                                  </div>
+                                </div>
+                                <AnimatePresence mode="popLayout">
+                                  {assignedTrainee ? (
+                                    <motion.div
+                                      initial={{ opacity: 0, scale: 0.9 }}
+                                      animate={{ opacity: 1, scale: 1 }}
+                                      exit={{ opacity: 0, scale: 0.9 }}
+                                      className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                                    >
+                                      <div className="min-w-0 flex-1">
+                                        <span className="font-black text-gray-900 truncate block">{assignedTrainee.fullName}</span>
+                                        <span className="text-[8px] text-gray-400 uppercase">{assignedTraineeRole} · {assignedTrainee.employeeCode}</span>
+                                      </div>
+                                      <button onClick={() => setAssignedTrainee(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
+                                    </motion.div>
+                                  ) : (
+                                    <motion.div
+                                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                      className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                                    >
+                                      Select Trainee Card ({eligiblePilots.length} Eligible)
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
                             )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Instructor Zone</span>
+                            {!selectedSimId ? (
+                              <div className="border border-dashed border-gray-300 rounded p-2.5 text-center text-[9px] font-bold text-gray-400 bg-gray-100 uppercase tracking-wider opacity-60">
+                                Select a simulator first...
+                              </div>
+                            ) : eligibleInstructors.length === 0 ? (
+                              <div className="border border-red-200 rounded p-2.5 text-center text-[9px] font-bold text-brand-red bg-red-50 uppercase tracking-wider">
+                                No eligible instructors found for {selectedSimTypeRating}
+                              </div>
+                            ) : (
+                              <AnimatePresence mode="popLayout">
+                                {assignedInstructor ? (
+                                  <motion.div
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                                  >
+                                    <span className="font-black text-gray-900 truncate flex-1">{assignedInstructor.name}</span>
+                                    <button onClick={() => setAssignedInstructor(null)} className="text-brand-red font-bold px-1 hover:scale-125 transition-transform shrink-0">×</button>
+                                  </motion.div>
+                                ) : (
+                                  <motion.div
+                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                    className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                                  >
+                                    Select Instructor Card ({eligibleInstructors.length} Eligible)
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            )}
+                          </div>
+                        </div>                </div>
                     </div>
 
                     <AnimatePresence>
@@ -2367,6 +2458,16 @@ export default function AdminPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {showGradeModal && gradeModalSession && (
+        <GradeSummaryModal
+          session={gradeModalSession}
+          onClose={() => {
+            setShowGradeModal(false);
+            setGradeModalSession(null);
+          }}
+        />
+      )}
     </div>
   );
 }

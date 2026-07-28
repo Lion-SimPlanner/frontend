@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { getSessions, SimulatorSession } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 
@@ -21,6 +22,25 @@ interface NotificationItem {
   timestamp: string;
   read: boolean;
 }
+
+const listContainer: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 }
+  }
+};
+
+const listItem: Variants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } }
+};
+
+const slideInRight: Variants = {
+  hidden: { opacity: 0, x: 20 },
+  show: { opacity: 1, x: 0, transition: { type: 'spring' as const, stiffness: 400, damping: 25 } },
+  exit: { opacity: 0, x: 20, transition: { duration: 0.15 } }
+};
 
 const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
 
@@ -59,6 +79,14 @@ const getSessionDurationHours = (start?: string, end?: string) => {
   return Math.max(0.5, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
 };
 
+const getStartOfLocalWeek = (value: Date) => {
+  const dt = startOfLocalDay(value);
+  const day = dt.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  dt.setDate(dt.getDate() + diff);
+  return dt;
+};
+
 export default function PilotDashboard() {
   const { user, logout, loading: authLoading } = useAuth();
   const router = useRouter();
@@ -66,7 +94,7 @@ export default function PilotDashboard() {
   const [sessions, setSessions] = useState<ExtendedSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ExtendedSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
+  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => getStartOfLocalWeek(new Date()));
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([
     {
@@ -179,15 +207,17 @@ export default function PilotDashboard() {
         const startHour = new Date(s.startTime).getHours();
         phase = startHour < 9 ? 'Phase 1' : startHour < 12 ? 'Phase 2' : startHour < 15 ? 'Phase 3' : 'Phase 4';
 
-        const captain = s.captainName || (s.captainId ? `Captain ${s.captainId.substring(0, 6)}` : 'Unassigned');
-        const fo = s.firstOfficerName || (s.firstOfficerId ? `FO ${s.firstOfficerId.substring(0, 6)}` : 'Unassigned');
+        const traineeName = s.traineeName || 'Unassigned';
+        const traineeRole = s.traineeRole || '';
         const instructor = s.instructorName || (s.instructorId ? `Instr. ${s.instructorId.substring(0, 6)}` : 'Instr. P. Langley');
 
         return {
           ...s,
           title,
           phase,
-          pilotName: `${captain} / ${fo}`,
+          pilotName: s.traineeEmployeeCode
+            ? `${s.traineeEmployeeCode} • ${traineeName}${traineeRole ? ` (${traineeRole})` : ''}`
+            : traineeName,
           instructorName: instructor,
           simulatorName: s.simulatorId,
         };
@@ -217,27 +247,43 @@ export default function PilotDashboard() {
 
   if (authLoading || !user || !mounted || loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-sm font-bold uppercase tracking-widest text-brand-red animate-pulse">
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
+          className="text-sm font-bold uppercase tracking-widest text-brand-red text-center"
+        >
           Loading Pilot Portal...
-        </div>
+        </motion.div>
       </div>
     );
   }
 
-  const visibleDayCount = 14;
+  const visibleDayCount = 7;
   const visibleDays = Array.from({ length: visibleDayCount }, (_, idx) => addLocalDays(calendarStartDate, idx));
   const visibleDayKeys = new Set(visibleDays.map(toLocalDateKey));
   const visibleSessions = sessions.filter((s) => {
     const start = toLocalDate(s.startTime);
     if (!start) return false;
-    return visibleDayKeys.has(toLocalDateKey(start));
+    if (!visibleDayKeys.has(toLocalDateKey(start))) return false;
+    const byEmployeeCode =
+      user?.employeeId && s.traineeEmployeeCode &&
+      s.traineeEmployeeCode.toLowerCase() === user.employeeId.toLowerCase();
+    const byCaptainId =
+      user?.id && s.captainId && s.captainId === user.id;
+    const byFirstOfficerId =
+      user?.id && s.firstOfficerId && s.firstOfficerId === user.id;
+    const byTraineeName =
+      user?.name && s.traineeName &&
+      s.traineeName.toLowerCase().includes(user.name.split(' ').pop()!.toLowerCase());
+    return !!(byEmployeeCode || byCaptainId || byFirstOfficerId || byTraineeName || !s.traineeEmployeeCode);
   });
   const calendarRangeLabel = formatCalendarRange(calendarStartDate, visibleDayCount);
 
   const goToPreviousWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, -visibleDayCount));
   const goToNextWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, visibleDayCount));
-  const goToTodayWindow = () => setCalendarStartDate(startOfLocalDay(new Date()));
+  const goToTodayWindow = () => setCalendarStartDate(getStartOfLocalWeek(new Date()));
 
   const visibleCount = visibleSessions.length;
   const pendingCount = visibleSessions.filter((s) => s.status === 'Scheduled' || s.status === 'Draft').length;
@@ -245,19 +291,19 @@ export default function PilotDashboard() {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <div className="h-screen flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
-      <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30">
-        <div className="flex items-center gap-6">
+    <div className="h-screen w-full flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
+      <header className="min-h-[4rem] border-b border-gray-200 bg-white flex flex-wrap items-center justify-between px-4 sm:px-6 py-2 gap-2 shrink-0 z-30 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+        <div className="flex items-center gap-3 sm:gap-6 min-w-0">
           <div className="flex items-center gap-2">
             <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
-            <div className="flex flex-col">
-              <span className="text-xs font-black tracking-widest text-gray-955">LION SIMPLANNER</span>
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider">Pilot Portal</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-black tracking-widest text-gray-955 truncate">LION SIMPLANNER</span>
+              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider truncate">Pilot Portal</span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
@@ -273,73 +319,81 @@ export default function PilotDashboard() {
               )}
             </button>
 
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                <div className="p-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black uppercase text-gray-900 tracking-wider">Pilot Notifications</span>
-                    {unreadCount > 0 && (
-                      <span className="bg-brand-red text-white text-[8px] font-black px-1.5 py-0.5 rounded-full">
-                        {unreadCount} new
-                      </span>
+            <AnimatePresence>
+              {showNotifications && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 overflow-hidden"
+                >
+                  <div className="p-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-black uppercase text-gray-900 tracking-wider truncate">Pilot Notifications</span>
+                      {unreadCount > 0 && (
+                        <span className="bg-brand-red text-white text-[8px] font-black px-1.5 py-0.5 rounded-full shrink-0">
+                          {unreadCount} new
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={markAllAsRead}
+                        className="text-[8px] font-bold uppercase text-gray-400 hover:text-gray-700 cursor-pointer"
+                      >
+                        Read All
+                      </button>
+                      <button
+                        onClick={clearNotifications}
+                        className="text-[8px] font-bold uppercase text-brand-red hover:text-red-700 cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
+                    {notifications.length > 0 ? (
+                      notifications.map((n) => {
+                        const colorClass =
+                          n.type === 'Red'
+                            ? 'bg-red-50 border-l-4 border-brand-red text-brand-red'
+                            : n.type === 'Green'
+                              ? 'bg-green-50 border-l-4 border-green-500 text-green-700'
+                              : n.type === 'Orange'
+                                ? 'bg-orange-50 border-l-4 border-orange-400 text-orange-700'
+                                : 'bg-blue-50 border-l-4 border-blue-400 text-blue-700';
+
+                        return (
+                          <div key={n.id} className={`p-3 transition-colors ${colorClass} ${!n.read ? 'font-bold' : 'opacity-80'}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-black uppercase tracking-wider block truncate">{n.title}</span>
+                              <span className="text-[8px] font-bold text-gray-400 shrink-0">{n.timestamp}</span>
+                            </div>
+                            <p className="text-[9px] text-gray-700 mt-1 leading-tight break-words">{n.message}</p>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 text-center text-xs text-gray-400 font-bold uppercase tracking-wider">
+                        No Active Notifications
+                      </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={markAllAsRead}
-                      className="text-[8px] font-bold uppercase text-gray-400 hover:text-gray-700"
-                    >
-                      Read All
-                    </button>
-                    <button
-                      onClick={clearNotifications}
-                      className="text-[8px] font-bold uppercase text-brand-red hover:text-red-700"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                <div className="max-h-80 overflow-y-auto divide-y divide-gray-100">
-                  {notifications.length > 0 ? (
-                    notifications.map((n) => {
-                      const colorClass =
-                        n.type === 'Red'
-                          ? 'bg-red-50 border-l-4 border-brand-red text-brand-red'
-                          : n.type === 'Green'
-                            ? 'bg-green-50 border-l-4 border-green-500 text-green-700'
-                            : n.type === 'Orange'
-                              ? 'bg-orange-50 border-l-4 border-orange-400 text-orange-700'
-                              : 'bg-blue-50 border-l-4 border-blue-400 text-blue-700';
-
-                      return (
-                        <div key={n.id} className={`p-3 transition-colors ${colorClass} ${!n.read ? 'font-bold' : 'opacity-80'}`}>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-black uppercase tracking-wider block">{n.title}</span>
-                            <span className="text-[8px] font-bold text-gray-400">{n.timestamp}</span>
-                          </div>
-                          <p className="text-[9px] text-gray-700 mt-1 leading-tight">{n.message}</p>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="p-4 text-center text-xs text-gray-400 font-bold uppercase tracking-wider">
-                      No Active Notifications
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          <div className="hidden md:flex flex-col text-right">
-            <span className="text-xs font-black text-gray-955 uppercase leading-none">{user.name}</span>
-            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Commercial Airline Pilot</span>
+          <div className="hidden md:flex flex-col text-right min-w-0">
+            <span className="text-xs font-black text-gray-955 uppercase leading-none truncate">{user.name}</span>
+            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Commercial Airline Pilot</span>
           </div>
-          <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0">
-            RH
+          <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0 transition-transform hover:scale-110">
+            {user.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
           </div>
-          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-colors shrink-0 ml-1 cursor-pointer">
+          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 ml-1 active:scale-90 p-1">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
@@ -347,28 +401,32 @@ export default function PilotDashboard() {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        <aside className="w-[20%] border-r border-gray-200 p-4 space-y-6 overflow-y-auto shrink-0 bg-white">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Window</span>
-              <span className="text-lg font-black text-gray-955 mt-1 block">{visibleCount}</span>
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-w-0">
+        <aside className="w-full lg:w-[22%] xl:w-[20%] border-b lg:border-b-0 lg:border-r border-gray-200 p-4 space-y-4 sm:space-y-6 overflow-y-auto shrink-0 bg-white shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid grid-cols-3 gap-2"
+          >
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Window</span>
+              <span className="text-base sm:text-lg font-black text-gray-955 mt-0.5 sm:mt-1 block">{visibleCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Pending</span>
-              <span className="text-lg font-black text-brand-red mt-1 block">{pendingCount}</span>
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Pending</span>
+              <span className="text-base sm:text-lg font-black text-brand-red mt-0.5 sm:mt-1 block">{pendingCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Done</span>
-              <span className="text-lg font-black text-green-600 mt-1 block">{completedCount}</span>
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Done</span>
+              <span className="text-base sm:text-lg font-black text-green-600 mt-0.5 sm:mt-1 block">{completedCount}</span>
             </div>
-          </div>
+          </motion.div>
 
           <div className="space-y-3">
-            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-              My Scheduled Sessions
+            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-red shrink-0" /> My Scheduled Sessions
             </div>
-            <div className="space-y-2">
+            <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[300px] lg:max-h-none overflow-y-auto pr-1">
               {visibleSessions.map((s) => {
                 const localStart = toLocalDate(s.startTime);
                 const timeLabel = localStart
@@ -376,68 +434,71 @@ export default function PilotDashboard() {
                   : 'N/A';
 
                 return (
-                  <div
+                  <motion.div
+                    variants={listItem}
                     key={s.sessionId}
                     onClick={() => setSelectedSession(s)}
-                    className={`p-3 border rounded bg-white cursor-pointer transition-all ${
-                      selectedSession?.sessionId === s.sessionId
+                    className={`p-3 border rounded bg-white cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${selectedSession?.sessionId === s.sessionId
                         ? 'border-brand-red shadow-sm'
                         : 'border-gray-150 hover:border-gray-300'
-                    }`}
+                      }`}
                   >
                     <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
                     <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.simulatorName}</div>
-                    <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
-                      <span>{timeLabel} • {s.phase}</span>
+                    <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2 gap-2">
+                      <span className="truncate">{timeLabel} • {s.phase}</span>
                       <span
-                        className={`px-1.5 py-0.5 rounded-full leading-none font-bold ${
-                          s.status === 'Completed'
-                            ? 'bg-green-50 text-green-600 border border-green-300'
+                        className={`px-1.5 py-0.5 rounded border leading-none font-bold transition-colors shrink-0 whitespace-nowrap ${s.status === 'Completed'
+                            ? 'bg-green-50 text-green-600 border-green-300'
                             : s.status === 'Scheduled'
-                              ? 'bg-blue-50 text-blue-600 border border-blue-300'
-                              : 'bg-orange-50 text-orange-600 border border-orange-300'
-                        }`}
+                              ? 'bg-blue-50 text-blue-600 border-blue-300'
+                              : 'bg-orange-50 text-orange-600 border-orange-300'
+                          }`}
                       >
                         {s.status}
                       </span>
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
-            </div>
+            </motion.div>
           </div>
         </aside>
 
-        <section className="w-[55%] p-6 overflow-y-auto bg-white border-r border-gray-200 flex flex-col">
-          <div className="border border-gray-150 rounded p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between mb-4 shrink-0">
-              <div>
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">Pilot 14-Day Schedule Grid</h3>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">{calendarRangeLabel}</p>
+        <section className="w-full lg:w-[53%] xl:w-[55%] p-4 sm:p-6 overflow-y-auto bg-gray-50/30 border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col min-w-0">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden hover:shadow-md transition-shadow"
+          >
+            <div className="flex flex-wrap items-center justify-between mb-4 shrink-0 min-w-0 gap-2">
+              <div className="min-w-0">
+                <h3 className="text-xs sm:text-sm font-black uppercase text-gray-900 tracking-wider truncate">Pilot 7-Day Schedule Grid</h3>
+                <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{calendarRangeLabel}</p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={goToPreviousWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  Prev 14d
+                  Prev Week
                 </button>
                 <button
                   onClick={goToTodayWindow}
-                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 cursor-pointer"
+                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
                   Today
                 </button>
                 <button
                   onClick={goToNextWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 cursor-pointer"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  Next 14d
+                  Next Week
                 </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto flex-1 flex flex-col border border-gray-100 rounded">
+            <div className="overflow-x-auto flex-1 flex flex-col border border-gray-100 rounded min-w-0">
               <div className="min-w-[1000px] flex flex-col flex-1">
                 <div
                   className="grid bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3 shrink-0"
@@ -445,9 +506,9 @@ export default function PilotDashboard() {
                 >
                   <div>Time</div>
                   {visibleDays.map((day) => (
-                    <div key={toLocalDateKey(day)} className="border-l border-gray-100 flex flex-col justify-center">
-                      <span>{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
-                      <span className="text-xs font-black text-gray-900 mt-0.5">{day.getDate()}</span>
+                    <div key={toLocalDateKey(day)} className="border-l border-gray-100 flex flex-col justify-center min-w-0">
+                      <span className="truncate">{day.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
+                      <span className="text-xs font-black text-gray-900 mt-0.5 truncate">{day.getDate()}</span>
                     </div>
                   ))}
                 </div>
@@ -470,47 +531,91 @@ export default function PilotDashboard() {
 
                     {visibleDays.map((day) => {
                       const dayKey = toLocalDateKey(day);
+                      const daySessions = visibleSessions.filter((s) => {
+                        const startDate = toLocalDate(s.startTime);
+                        return !!startDate && toLocalDateKey(startDate) === dayKey;
+                      });
+
+                      const columnOf: Record<string, number> = {};
+                      const totalColumnsOf: Record<string, number> = {};
+                      const sorted = [...daySessions].sort(
+                        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+                      );
+                      sorted.forEach((s) => {
+                        const sStart = new Date(s.startTime).getTime();
+                        const sEnd = new Date(s.endTime || s.startTime).getTime();
+                        const overlapping = sorted.filter((o) => {
+                          if (o.sessionId === s.sessionId) return false;
+                          const oStart = new Date(o.startTime).getTime();
+                          const oEnd = new Date(o.endTime || o.startTime).getTime();
+                          return sStart < oEnd && sEnd > oStart;
+                        });
+                        const usedCols = new Set(overlapping.map((o) => columnOf[o.sessionId]).filter((c) => c !== undefined));
+                        let col = 0;
+                        while (usedCols.has(col)) col++;
+                        columnOf[s.sessionId] = col;
+                        const group = [s, ...overlapping];
+                        const maxCol = Math.max(...group.map((g) => columnOf[g.sessionId] ?? 0)) + 1;
+                        group.forEach((g) => {
+                          totalColumnsOf[g.sessionId] = Math.max(totalColumnsOf[g.sessionId] ?? 1, maxCol);
+                        });
+                      });
 
                       return (
                         <div key={dayKey} className="relative border-r border-gray-50 last:border-r-0 h-full">
-                          {visibleSessions
-                            .filter((s) => {
-                              const startDate = toLocalDate(s.startTime);
-                              return !!startDate && toLocalDateKey(startDate) === dayKey;
-                            })
-                            .map((s) => {
-                              const startDate = toLocalDate(s.startTime);
-                              if (!startDate) return null;
-                              const startHour = startDate.getHours();
-                              const startMinute = startDate.getMinutes();
-                              const duration = getSessionDurationHours(s.startTime, s.endTime);
-                              const topOffset = (startHour - 6) * 35 + (startMinute / 60) * 35;
-                              const height = duration * 35;
+                          {daySessions.map((s) => {
+                            const startDate = toLocalDate(s.startTime);
+                            if (!startDate) return null;
+                            const startHour = startDate.getHours();
+                            const startMinute = startDate.getMinutes();
+                            const duration = getSessionDurationHours(s.startTime, s.endTime);
+                            const topOffset = (startHour - 6) * 35 + (startMinute / 60) * 35;
+                            const height = duration * 35;
 
-                              if (topOffset < 0 || topOffset > 455) return null;
+                            if (topOffset < 0 || topOffset > 455) return null;
 
-                              return (
-                                <div
-                                  key={s.sessionId}
-                                  onClick={() => setSelectedSession(s)}
-                                  style={{
-                                    top: `${topOffset}px`,
-                                    height: `${height - 2}px`,
-                                  }}
-                                  className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-all z-20 ${
-                                    selectedSession?.sessionId === s.sessionId
-                                      ? 'bg-brand-red border border-red-800 font-black'
-                                      : 'bg-gray-400 hover:bg-gray-500 font-medium'
+                            const col = columnOf[s.sessionId] ?? 0;
+                            const total = totalColumnsOf[s.sessionId] ?? 1;
+                            const widthPct = 100 / total;
+                            const leftPct = col * widthPct;
+
+                            return (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                whileHover={{ scale: 1.03, zIndex: 30 }}
+                                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                                key={s.sessionId}
+                                onClick={() => setSelectedSession(s)}
+                                style={{
+                                  top: `${topOffset}px`,
+                                  height: `${height - 2}px`,
+                                  left: `calc(${leftPct}% + 2px)`,
+                                  width: `calc(${widthPct}% - 4px)`,
+                                }}
+                                className={`absolute p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-colors active:scale-95 ${selectedSession?.sessionId === s.sessionId
+                                    ? 'bg-brand-red border border-red-800 font-black z-30'
+                                    : s.status === 'Scheduled' || s.status === 'Draft'
+                                      ? 'bg-blue-500 hover:bg-blue-600 border border-blue-700 font-bold z-20'
+                                      : s.status === 'InProgress'
+                                        ? 'bg-green-600 hover:bg-green-700 border border-green-800 font-bold z-20 animate-pulse'
+                                        : s.status === 'Completed'
+                                          ? 'bg-teal-600 hover:bg-teal-700 border border-teal-800 font-bold z-20'
+                                          : s.status === 'TerminatedEarly'
+                                            ? 'bg-purple-600 hover:bg-purple-700 border border-purple-800 font-bold z-20'
+                                            : s.status === 'Cancelled'
+                                              ? 'bg-gray-300 hover:bg-gray-400 border border-gray-400 font-medium z-10 opacity-70'
+                                              : 'bg-blue-500 hover:bg-blue-600 border border-blue-700 font-medium z-20'
                                   }`}
-                                >
-                                  <div className="min-w-0">
-                                    <div className="text-[7.5px] font-black uppercase tracking-wider truncate leading-tight">{s.title}</div>
-                                    <div className="text-[7px] opacity-90 truncate font-bold mt-0.5">{s.simulatorName}</div>
-                                  </div>
-                                  <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase}</span>
+                              >
+                                <div className="min-w-0">
+                                  <div className="text-[7.5px] font-black uppercase tracking-wider truncate leading-tight">{s.title}</div>
+                                  <div className="text-[7px] opacity-90 truncate font-bold mt-0.5">{s.simulatorName}</div>
                                 </div>
-                              );
-                            })}
+                                <span className="text-[6.5px] font-black uppercase block leading-none truncate mt-0.5">{s.phase}</span>
+                              </motion.div>
+                            );
+                          })}
                         </div>
                       );
                     })}
@@ -518,74 +623,88 @@ export default function PilotDashboard() {
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         </section>
 
-        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6 shrink-0">
-          {selectedSession ? (
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6">
-              <div className="space-y-4 border-b border-gray-100 pb-4">
-                <span className="bg-brand-red text-white text-[8px] font-black px-2 py-0.5 rounded uppercase">
-                  {selectedSession.status}
-                </span>
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1">{selectedSession.title}</h3>
-                <div className="text-[9px] text-gray-400 font-bold uppercase">
-                  {toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}
-                </div>
+        <aside className="w-full lg:w-[25%] p-4 sm:p-6 overflow-y-auto bg-white space-y-6 shrink-0 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+          <AnimatePresence mode="wait">
+            {selectedSession ? (
+              <motion.div
+                key={selectedSession.sessionId}
+                variants={slideInRight}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm space-y-6 hover:shadow-md transition-shadow"
+              >
+                <div className="space-y-4 border-b border-gray-100 pb-4 min-w-0">
+                  <span className="bg-brand-red text-white text-[8px] font-black px-2 py-0.5 rounded uppercase inline-block whitespace-nowrap">
+                    {selectedSession.status}
+                  </span>
+                  <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider mt-1 truncate">{selectedSession.title}</h3>
+                  <div className="text-[9px] text-gray-400 font-bold uppercase truncate">
+                    {toLocalDate(selectedSession.startTime)?.toLocaleString('en-GB', { hour12: false }) ?? 'N/A'}
+                  </div>
 
-                <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1">
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">Captain</span>
-                    <span className="font-black text-gray-900 truncate block">
-                      {selectedSession.captainName || (selectedSession.captainId ? selectedSession.captainId.substring(0, 8) : 'Unassigned')}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">First Officer</span>
-                    <span className="font-black text-gray-900 truncate block">
-                      {selectedSession.firstOfficerName || (selectedSession.firstOfficerId ? selectedSession.firstOfficerId.substring(0, 8) : 'Unassigned')}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">Instructor</span>
-                    <span className="font-black text-gray-900 truncate block">
-                      {selectedSession.instructorName || (selectedSession.instructorId ? selectedSession.instructorId.substring(0, 8) : 'Instr. P. Langley')}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">Phase</span>
-                    <span className="font-black text-gray-900">{selectedSession.phase}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">Simulator</span>
-                    <span className="font-black text-gray-900 truncate max-w-[110px] block" title={selectedSession.simulatorName}>
-                      {selectedSession.simulatorName}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px]">Syllabus ID</span>
-                    <span className="font-black text-gray-900 truncate block">{selectedSession.syllabusId}</span>
-                  </div>
-                </div>
-              </div>
-
-              {selectedSession.isGraded && (
-                <div className="space-y-2 border border-green-200 bg-green-50 p-3 rounded text-[10px]">
-                  <span className="font-black text-green-700 uppercase block tracking-wider">Grading Completed</span>
-                  <div className="font-bold text-gray-800">Status: {selectedSession.gradeStatus || 'Passed'}</div>
-                  {selectedSession.instructorNotes && (
-                    <div className="text-[9px] text-gray-600 mt-1 leading-relaxed">
-                      Notes: {selectedSession.instructorNotes}
+                  <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1 min-w-0">
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Trainee</span>
+                      <span className="font-black text-gray-900 truncate block">
+                        {selectedSession.traineeName || selectedSession.traineeEmployeeCode || 'Unassigned'}
+                      </span>
                     </div>
-                  )}
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Trainee Role</span>
+                      <span className="font-black text-gray-900 truncate block">
+                        {selectedSession.traineeRole || '—'}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Instructor</span>
+                      <span className="font-black text-gray-900 truncate block">
+                        {selectedSession.instructorName || (selectedSession.instructorId ? selectedSession.instructorId.substring(0, 8) : 'Instr. P. Langley')}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Phase</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.phase}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Simulator</span>
+                      <span className="font-black text-gray-900 truncate block" title={selectedSession.simulatorName}>
+                        {selectedSession.simulatorName}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-gray-400 block font-bold uppercase tracking-wider text-[8px] truncate">Syllabus ID</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.syllabusId}</span>
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          ) : (
-            <div className="border border-gray-150 rounded p-6 bg-white text-center text-gray-400 text-xs font-bold py-12 uppercase tracking-wider">
-              Select a session in the 14-day window to view details
-            </div>
-          )}
+
+                {selectedSession.isGraded && (
+                  <div className="space-y-2 border border-green-200 bg-green-50 p-3 rounded text-[10px]">
+                    <span className="font-black text-green-700 uppercase block tracking-wider truncate">Grading Completed</span>
+                    <div className="font-bold text-gray-800 truncate">Status: {selectedSession.gradeStatus || 'Passed'}</div>
+                    {selectedSession.instructorNotes && (
+                      <div className="text-[9px] text-gray-600 mt-1 leading-relaxed break-words">
+                        Notes: {selectedSession.instructorNotes}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="border border-gray-150 rounded p-6 bg-white text-center text-gray-400 text-xs font-bold py-12 uppercase tracking-wider shadow-sm"
+              >
+                Select a session in the 7-day window to view details
+              </motion.div>
+            )}
+          </AnimatePresence>
         </aside>
       </div>
     </div>

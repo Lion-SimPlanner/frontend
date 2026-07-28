@@ -12,6 +12,9 @@ import {
   getSessions,
   resolveDefect,
   checkoutEngineerShift,
+  getDefectReports,
+  resolveDefectReport,
+  DefectReport,
   Simulator,
   Engineer,
   SimulatorSession
@@ -19,7 +22,6 @@ import {
 import { getHubConnection, startConnection } from '@/services/signalr';
 import ResolveDefectModal from '@/components/engineer/ResolveDefectModal';
 
-// --- Framer Motion Variants ---
 const listContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
@@ -51,7 +53,6 @@ const slideInTop: Variants = {
   exit: { opacity: 0, y: -20, transition: { duration: 0.15 } }
 };
 
-// --- Utilities ---
 const toLocalDate = (value?: string) => {
   if (!value) return null;
   const dt = new Date(value);
@@ -125,6 +126,9 @@ export default function EngineerDashboard() {
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
+  const [defects, setDefects] = useState<DefectReport[]>([]);
+  const [selectedDefectToResolve, setSelectedDefectToResolve] = useState<DefectReport | null>(null);
+
   useEffect(() => {
     setMounted(true);
     setCurrentTime(new Date());
@@ -175,20 +179,42 @@ export default function EngineerDashboard() {
           )
         );
       };
+
+      const handleDefectReported = (payload: DefectReport) => {
+        setDefects((prev) => [payload, ...prev.filter((d) => d.defectId !== payload.defectId)]);
+        loadData();
+      };
+
+      const handleDefectResolved = (payload: { defectId: string; simulatorId: string }) => {
+        setDefects((prev) => prev.filter((d) => d.defectId !== payload.defectId));
+        loadData();
+      };
+
       hub.on('AogReported', handleAogReported);
+      hub.on('DefectReported', handleDefectReported);
+      hub.on('DefectResolved', handleDefectResolved);
+
       return () => {
         hub.off('AogReported', handleAogReported);
+        hub.off('DefectReported', handleDefectReported);
+        hub.off('DefectResolved', handleDefectResolved);
       };
     }
   }, [user, authLoading, router, mounted]);
 
   const loadData = async () => {
     try {
-      const [sims, engs, sess] = await Promise.all([getSimulators(), getEngineers(), getSessions()]);
+      const [sims, engs, sess, defectReports] = await Promise.all([
+        getSimulators(),
+        getEngineers(),
+        getSessions(),
+        getDefectReports(),
+      ]);
       setSimulators(sims);
       setEngineers(engs);
       setSessions(sess);
-      setActiveFault(sims.some((sim) => !isReadyStatus(sim.status)));
+      setDefects(defectReports);
+      setActiveFault(sims.some((sim) => !isReadyStatus(sim.status)) || defectReports.some((d) => d.status !== 'Resolved'));
     } catch (err) {
       console.error(err);
     } finally {
@@ -218,33 +244,24 @@ export default function EngineerDashboard() {
   };
 
   const handleResolveDefect = async () => {
-    const targetSimulator = currentSimulator;
-    if (!targetSimulator) {
-      setResolveError('No active simulator defect to resolve.');
-      return;
-    }
-
-    if (isReadyStatus(targetSimulator.status)) {
-      setResolveError('Current simulator has no active defect to resolve.');
-      return;
-    }
-
     setResolveError(null);
     setIsResolving(true);
     try {
-      const result = await resolveDefect(targetSimulator.id, resolutionDetails.trim());
-      const resolvedAt = result.resolvedAt ?? new Date().toISOString();
-      setSimulators((prev) =>
-        prev.map((sim) =>
-          sim.id === targetSimulator.id
-            ? { ...sim, status: 'Ready', lastChangedAt: resolvedAt }
-            : sim
-        )
-      );
-      setActiveFault(false);
+      if (selectedDefectToResolve) {
+        await resolveDefectReport(selectedDefectToResolve.defectId, resolutionDetails.trim() || 'Defect resolved by engineer.');
+        setSelectedDefectToResolve(null);
+      } else {
+        const targetSimulator = currentSimulator;
+        if (!targetSimulator) {
+          setResolveError('No active simulator defect to resolve.');
+          return;
+        }
+        await resolveDefect(targetSimulator.id, resolutionDetails.trim() || 'Defect resolved.');
+      }
       setShowResolveModal(false);
       setResolutionDetails('');
       setShowSuccessToast(true);
+      await loadData();
       setTimeout(() => {
         setShowSuccessToast(false);
       }, 5000);
@@ -335,12 +352,12 @@ export default function EngineerDashboard() {
 
   if (authLoading || !user || !mounted || loading || !currentTime) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
-          className="text-sm font-bold uppercase tracking-widest text-brand-red"
+          className="text-sm font-bold uppercase tracking-widest text-brand-red text-center"
         >
           Loading Engineering Portal...
         </motion.div>
@@ -368,24 +385,6 @@ export default function EngineerDashboard() {
   }).length;
   const degradedCount = simulators.filter((s) => normalizeStatusLabel(s.status) === 'MEL').length;
 
-  const shiftDays = Array.from(new Set(engineers.map((e) => toLocalDate(e.shiftStart)?.getDate()).filter((d): d is number => typeof d === 'number')));
-  const sessionDays = Array.from(new Set(sessions.map((s) => toLocalDate(s.startTime)?.getDate()).filter((d): d is number => typeof d === 'number')));
-  const signedOffDays = Array.from(new Set(
-    simulators
-      .map((sim) => sim.lastDailySignOffDate)
-      .filter((v): v is string => typeof v === 'string' && v.length === 10)
-      .map((dateValue) => {
-        const dt = toLocalDate(`${dateValue}T00:00:00`);
-        return dt?.getDate();
-      })
-      .filter((d): d is number => typeof d === 'number')
-  ));
-  const aogDays = simulators
-    .filter((s) => (s.status === 'AOG' || s.status === 'Down') && s.lastChangedAt)
-    .map((s) => toLocalDate(s.lastChangedAt)?.getDate())
-    .filter((d): d is number => typeof d === 'number');
-
-  const todayDayNumber = currentTime.getDate();
   const topBarDateLabel = currentTime.toLocaleDateString('en-GB', {
     weekday: 'long',
     day: 'numeric',
@@ -393,18 +392,6 @@ export default function EngineerDashboard() {
     year: 'numeric'
   });
 
-  // Mock Shift Log for Stagger Animation
-  const mockShiftLog = [
-    { time: '06:00', iconColor: 'bg-gray-400', text: 'Shift handover received from Night Eng. R. Yamada' },
-    { time: '06:15', iconColor: 'bg-green-500', text: 'Motion platform pre-flight check — PASSED (all 6 axes nominal)' },
-    { time: '07:30', iconColor: 'bg-green-500', text: 'Visual system calibration completed — 3-channel alignment verified' },
-    { time: '09:12', iconColor: 'bg-orange-500', text: 'FMS / Avionics Bus — B737 FMC comms fault detected. Investigating.' },
-    { time: '09:45', iconColor: 'bg-orange-500', text: 'CH-2 VHF dropout logged. Intermittent — monitoring.' },
-    { time: '11:00', iconColor: 'bg-gray-400', text: 'Instructor briefing support — SIM-01 session Type Rating (Capt. Holt)' },
-    { time: '12:30', iconColor: 'bg-green-500', text: 'Hydraulic system pressure check — 3000 psi nominal' }
-  ];
-
-  // Hardware components mapped for animation
   const hardwareComponents = [
     { label: 'Motion Platform', value: '99.2%', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
     { label: 'Visual System', value: '120 Hz', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
@@ -417,9 +404,9 @@ export default function EngineerDashboard() {
   ];
 
   return (
-    <div className="h-screen flex bg-white text-gray-900 overflow-hidden font-sans">
-      <aside className="w-64 border-r border-gray-200 bg-white flex flex-col justify-between p-4 shrink-0 shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
-        <div className="space-y-6">
+    <div className="h-screen w-full flex flex-col md:flex-row bg-white text-gray-900 overflow-hidden font-sans">
+      <aside className="w-full md:w-64 lg:w-72 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col justify-between p-4 shrink-0 shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10 overflow-y-auto">
+        <div className="space-y-4 md:space-y-6">
           <div className="flex items-center gap-3">
             <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
             <div className="flex flex-col min-w-0">
@@ -438,23 +425,23 @@ export default function EngineerDashboard() {
           </motion.div>
 
           <nav className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white transition-all active:scale-95 shadow-sm">
+            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white transition-all active:scale-95 shadow-sm cursor-pointer">
               Overview
             </button>
           </nav>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 mt-4 md:mt-0">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="p-3 bg-red-50 border border-brand-red rounded text-[10px] space-y-1 shadow-sm"
           >
             <div className="font-black text-brand-red uppercase flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-pulse" /> Active Alerts
+              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-pulse shrink-0" /> Active Alerts
             </div>
-            <div className="text-gray-900 font-bold">{faultCount} FAULT — action required</div>
-            <div className="text-gray-900 font-bold">{degradedCount} DEGRADED — monitor</div>
+            <div className="text-gray-900 font-bold truncate">{faultCount} FAULT — action required</div>
+            <div className="text-gray-900 font-bold truncate">{degradedCount} DEGRADED — monitor</div>
           </motion.div>
 
           <div className="flex items-center justify-between border-t border-gray-150 pt-3">
@@ -467,7 +454,7 @@ export default function EngineerDashboard() {
                 <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Sim Engineer • Day</div>
               </div>
             </div>
-            <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 active:scale-90">
+            <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 active:scale-90 ml-1">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
@@ -476,10 +463,10 @@ export default function EngineerDashboard() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden bg-white w-full">
-        <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30">
-          <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-sm font-black uppercase text-gray-950 truncate">Maintenance & Shift Overview</h1>
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white">
+        <header className="min-h-[4rem] border-b border-gray-200 bg-white flex flex-wrap items-center justify-between px-4 sm:px-6 py-2 gap-2 shrink-0 z-30">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <h1 className="text-xs sm:text-sm font-black uppercase text-gray-950 truncate">Maintenance & Shift Overview</h1>
             <AnimatePresence>
               {activeFault && (
                 <motion.span
@@ -493,20 +480,20 @@ export default function EngineerDashboard() {
               )}
             </AnimatePresence>
           </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider hidden sm:block">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold uppercase tracking-wider hidden lg:block truncate max-w-md">
               {topBarDateLabel} • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
             </span>
             <button
               onClick={handleCheckout}
               disabled={checkoutPending}
-              className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-sm cursor-pointer"
+              className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-sm cursor-pointer whitespace-nowrap"
             >
               {checkoutPending ? 'Checking Out...' : 'Checkout Shift'}
             </button>
-            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded shadow-inner">
-              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping" />
-              <span className="text-[9px] font-black text-gray-900">{currentTime.toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
+            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2 sm:px-2.5 py-1 rounded shadow-inner shrink-0">
+              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping shrink-0" />
+              <span className="text-[8px] sm:text-[9px] font-black text-gray-900 whitespace-nowrap">{currentTime.toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
             </div>
           </div>
         </header>
@@ -518,7 +505,7 @@ export default function EngineerDashboard() {
               initial="hidden"
               animate="show"
               exit="exit"
-              className={`mx-6 mt-4 p-3 rounded border text-xs font-bold shadow-sm ${checkoutError ? 'bg-red-50 border-red-300 text-brand-red' : 'bg-green-50 border-green-400 text-green-800'}`}
+              className={`mx-4 sm:mx-6 mt-4 p-3 rounded border text-xs font-bold shadow-sm ${checkoutError ? 'bg-red-50 border-red-300 text-brand-red' : 'bg-green-50 border-green-400 text-green-800'}`}
             >
               {checkoutError
                 ? checkoutError
@@ -527,106 +514,241 @@ export default function EngineerDashboard() {
           )}
         </AnimatePresence>
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-w-0">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
-            className="w-3/5 h-full overflow-y-auto p-6 space-y-6"
+            className="w-full lg:w-7/12 xl:w-3/5 h-auto lg:h-full overflow-y-auto p-4 sm:p-6 space-y-6 shrink-0 lg:shrink min-w-0"
           >
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">
-                    {currentTime.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+            <div className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 bg-brand-red rounded-full animate-pulse shrink-0" />
+                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider truncate">
+                    Defect Triage Board
                   </h3>
-                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Maintenance Shift Calendar</p>
                 </div>
-                <div className="flex gap-1">
-                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600 transition-colors active:scale-90">&lt;</button>
-                  <button className="p-1 border border-gray-200 rounded hover:bg-gray-50 text-xs font-bold text-gray-600 transition-colors active:scale-90">&gt;</button>
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 bg-red-100 border border-red-300 text-brand-red text-[8px] font-black rounded-full whitespace-nowrap">
+                    {defects.filter((d) => d.severity === 'AOG' && d.status !== 'Resolved').length} AOG
+                  </span>
+                  <span className="px-2 py-0.5 bg-orange-100 border border-orange-300 text-orange-800 text-[8px] font-black rounded-full whitespace-nowrap">
+                    {defects.filter((d) => d.severity === 'MEL' && d.status !== 'Resolved').length} MEL
+                  </span>
+                  <span className="px-2 py-0.5 bg-yellow-100 border border-yellow-300 text-yellow-800 text-[8px] font-black rounded-full whitespace-nowrap">
+                    {defects.filter((d) => d.severity === 'Defect' && d.status !== 'Resolved').length} Defect
+                  </span>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-4 text-[9px] font-black uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 text-gray-500">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-brand-red shadow-[0_0_5px_rgba(239,68,68,0.5)]" /> Shift Day</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_rgba(34,197,94,0.5)]" /> Signed Off</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_5px_rgba(249,115,22,0.5)]" /> AOG Event</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-300" /> Off</span>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 text-center text-xs">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                  <div key={d} className="font-black text-[9px] uppercase tracking-wider text-gray-400 py-1">{d}</div>
-                ))}
-
-                <div className="border border-transparent py-4 text-transparent">30</div>
-                <div className="border border-transparent py-4 text-transparent">31</div>
-
-                {Array.from({ length: 31 }, (_, i) => i + 1).map(day => {
-                  const isToday = day === todayDayNumber;
-                  const isShift = shiftDays.includes(day);
-                  const isSignedOff = signedOffDays.includes(day);
-                  const isAog = aogDays.includes(day);
-
-                  return (
-                    <motion.div
-                      key={day}
-                      whileHover={{ scale: 1.05 }}
-                      className={`border py-2 relative flex flex-col items-center justify-between h-14 transition-colors cursor-default ${isToday ? 'bg-red-50 border-brand-red shadow-sm' : 'bg-white border-gray-100 hover:border-gray-200'}`}
-                    >
-                      <span className={`text-[10px] font-black ${isToday ? 'text-brand-red text-xs' : 'text-gray-900'}`}>{day}</span>
-                      {isToday && <span className="text-[7px] font-black text-brand-red uppercase leading-none mt-1">NOW</span>}
-                      <div className="flex gap-0.5 justify-center mt-auto pb-1">
-                        {isShift && <span className="w-1.5 h-1.5 rounded-full bg-brand-red" />}
-                        {isSignedOff && <span className="w-1.5 h-1.5 rounded-full bg-green-500" />}
-                        {isAog && <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 border-t border-gray-100 pt-4 flex items-center justify-between">
-                <span className="text-xs font-bold text-gray-900">
-                  {currentTime.toLocaleDateString('en-GB', { month: 'long', day: 'numeric', year: 'numeric' })} • Daily checklist signed off
-                </span>
-                <span className="bg-green-50 text-green-700 border border-green-500 text-[8px] font-black px-2 py-0.5 rounded uppercase">Complete</span>
-              </div>
-            </div>
-
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow space-y-4">
-              <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 bg-brand-red rounded-full" />
-                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider">Today's Shift Log</h3>
-                </div>
-                <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">
-                  {currentTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()} • Day Shift
-                </span>
-              </div>
-
-              <motion.div
-                variants={listContainer}
-                initial="hidden"
-                animate="show"
-                className="space-y-3"
-              >
-                {mockShiftLog.map((log, index) => (
-                  <motion.div variants={listItem} key={index} className="flex items-start gap-3 text-xs group">
-                    <span className="text-brand-red font-black text-[9px] tracking-wider pt-0.5 shrink-0">{log.time}</span>
-                    <div className="flex items-center gap-2 min-w-0 p-1 -m-1 rounded group-hover:bg-gray-50 transition-colors flex-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${log.iconColor} shrink-0`} />
-                      <p className="text-gray-600 truncate">{log.text}</p>
+              <div className="space-y-4 sm:space-y-6">
+                <div className="border border-red-300 bg-red-50/50 rounded-lg p-3 sm:p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-brand-red animate-ping shrink-0" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-brand-red truncate">
+                        Red Zone — AOG (Grounding Faults)
+                      </h4>
                     </div>
-                  </motion.div>
-                ))}
-              </motion.div>
+                    <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-brand-red text-white rounded shrink-0 whitespace-nowrap">
+                      Locks Simulator
+                    </span>
+                  </div>
 
-              <div className="border-t border-gray-100 pt-4 flex justify-between items-center">
-                <button className="text-brand-red hover:text-red-700 transition-colors text-xs font-black uppercase tracking-wider cursor-pointer active:scale-95 flex items-center gap-1">
-                  Export Full Shift Report (PDF)
-                </button>
+                  {defects.filter((d) => d.severity === 'AOG' && d.status !== 'Resolved').length === 0 ? (
+                    <div className="p-3 bg-white/80 border border-red-200 rounded text-center text-[9px] font-bold text-gray-500 uppercase tracking-wider">
+                      ✓ No active AOG grounding defects reported.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {defects
+                        .filter((d) => d.severity === 'AOG' && d.status !== 'Resolved')
+                        .map((d, idx) => {
+                          const targetSim = simulators.find((s) => s.id === d.simulatorId);
+                          return (
+                            <motion.div
+                              key={d.defectId || idx}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.25, delay: idx * 0.05 }}
+                              className="p-3 bg-white border border-red-300 rounded shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                            >
+                              <div className="space-y-1 flex-1 min-w-0 w-full">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <span className="text-xs font-black text-gray-900 truncate max-w-full">
+                                    {targetSim ? targetSim.name : 'Simulator'} — {d.systemAffected}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-red-100 text-brand-red border border-red-300 text-[7.5px] font-black rounded uppercase whitespace-nowrap">
+                                    🔒 AOG LOCKED
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-700 font-bold leading-snug break-words">
+                                  "{d.instructorNotes}"
+                                </p>
+                                <div className="text-[8px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+                                  <span className="truncate">Reported by {d.reportedBy}</span>
+                                  <span>·</span>
+                                  <span className="whitespace-nowrap">{formatLocalDateTime(d.reportedAt)}</span>
+                                  {d.sessionId && (
+                                    <>
+                                      <span>·</span>
+                                      <span className="truncate">Session {d.sessionId.substring(0, 8)}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedDefectToResolve(d);
+                                  setResolutionDetails('');
+                                  setResolveError(null);
+                                  setShowResolveModal(true);
+                                }}
+                                className="w-full sm:w-auto px-3 py-1.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer shrink-0 shadow-sm text-center whitespace-nowrap"
+                              >
+                                Resolve & Clear
+                              </button>
+                            </motion.div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border border-orange-300 bg-orange-50/50 rounded-lg p-3 sm:p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-orange-950 truncate">
+                        Orange Zone — MEL (Degraded System Limits)
+                      </h4>
+                    </div>
+                    <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-orange-500 text-white rounded shrink-0 whitespace-nowrap">
+                      Operates with Limits
+                    </span>
+                  </div>
+
+                  {defects.filter((d) => d.severity === 'MEL' && d.status !== 'Resolved').length === 0 ? (
+                    <div className="p-3 bg-white/80 border border-orange-200 rounded text-center text-[9px] font-bold text-gray-500 uppercase tracking-wider">
+                      ✓ No open MEL restrictions logged.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {defects
+                        .filter((d) => d.severity === 'MEL' && d.status !== 'Resolved')
+                        .map((d, idx) => {
+                          const targetSim = simulators.find((s) => s.id === d.simulatorId);
+                          return (
+                            <motion.div
+                              key={d.defectId || idx}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.25, delay: idx * 0.05 }}
+                              className="p-3 bg-white border border-orange-300 rounded shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                            >
+                              <div className="space-y-1 flex-1 min-w-0 w-full">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <span className="text-xs font-black text-gray-900 truncate max-w-full">
+                                    {targetSim ? targetSim.name : 'Simulator'} — {d.systemAffected}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-orange-100 text-orange-800 border border-orange-300 text-[7.5px] font-black rounded uppercase whitespace-nowrap">
+                                    MEL DISPATCH
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-700 font-bold leading-snug break-words">
+                                  "{d.instructorNotes}"
+                                </p>
+                                <div className="text-[8px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+                                  <span className="truncate">Reported by {d.reportedBy}</span>
+                                  <span>·</span>
+                                  <span className="whitespace-nowrap">{formatLocalDateTime(d.reportedAt)}</span>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedDefectToResolve(d);
+                                  setResolutionDetails('');
+                                  setResolveError(null);
+                                  setShowResolveModal(true);
+                                }}
+                                className="w-full sm:w-auto px-3 py-1.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer shrink-0 shadow-sm text-center whitespace-nowrap"
+                              >
+                                Resolve & Clear
+                              </button>
+                            </motion.div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border border-yellow-300 bg-yellow-50/50 rounded-lg p-3 sm:p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2 h-2 rounded-full bg-yellow-500 shrink-0" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-yellow-950 truncate">
+                        Yellow Zone — Defect (Minor Log & Monitor)
+                      </h4>
+                    </div>
+                    <span className="text-[8px] font-black uppercase px-2 py-0.5 bg-yellow-600 text-white rounded shrink-0 whitespace-nowrap">
+                      Monitoring
+                    </span>
+                  </div>
+
+                  {defects.filter((d) => d.severity === 'Defect' && d.status !== 'Resolved').length === 0 ? (
+                    <div className="p-3 bg-white/80 border border-yellow-200 rounded text-center text-[9px] font-bold text-gray-500 uppercase tracking-wider">
+                      ✓ No minor defects logged.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {defects
+                        .filter((d) => d.severity === 'Defect' && d.status !== 'Resolved')
+                        .map((d, idx) => {
+                          const targetSim = simulators.find((s) => s.id === d.simulatorId);
+                          return (
+                            <motion.div
+                              key={d.defectId || idx}
+                              initial={{ opacity: 0, y: 10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.25, delay: idx * 0.05 }}
+                              className="p-3 bg-white border border-yellow-300 rounded shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                            >
+                              <div className="space-y-1 flex-1 min-w-0 w-full">
+                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                  <span className="text-xs font-black text-gray-900 truncate max-w-full">
+                                    {targetSim ? targetSim.name : 'Simulator'} — {d.systemAffected}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-800 border border-yellow-300 text-[7.5px] font-black rounded uppercase whitespace-nowrap">
+                                    LOGGED
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-700 font-bold leading-snug break-words">
+                                  "{d.instructorNotes}"
+                                </p>
+                                <div className="text-[8px] text-gray-400 font-bold uppercase tracking-wider flex items-center gap-1.5 flex-wrap">
+                                  <span className="truncate">Reported by {d.reportedBy}</span>
+                                  <span>·</span>
+                                  <span className="whitespace-nowrap">{formatLocalDateTime(d.reportedAt)}</span>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedDefectToResolve(d);
+                                  setResolutionDetails('');
+                                  setResolveError(null);
+                                  setShowResolveModal(true);
+                                }}
+                                className="w-full sm:w-auto px-3 py-1.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer shrink-0 shadow-sm text-center whitespace-nowrap"
+                              >
+                                Resolve & Clear
+                              </button>
+                            </motion.div>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
@@ -635,15 +757,15 @@ export default function EngineerDashboard() {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
-            className="w-2/5 h-full border-l border-gray-200 p-6 overflow-y-auto space-y-6 bg-gray-50/30"
+            className="w-full lg:w-5/12 xl:w-2/5 h-auto lg:h-full border-t lg:border-t-0 lg:border-l border-gray-200 p-4 sm:p-6 overflow-y-auto space-y-6 bg-gray-50/30 shrink-0 lg:shrink min-w-0"
           >
-            <div className="border border-gray-150 rounded p-6 bg-white shadow-sm hover:shadow-md transition-shadow space-y-6">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3 min-w-0">
+            <div className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm hover:shadow-md transition-shadow space-y-6">
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3 min-w-0 gap-2">
                 <div className="flex flex-col min-w-0">
                   <span className="text-[8px] font-black text-brand-red uppercase tracking-wider truncate">Hardware Health Monitor</span>
                   <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider mt-0.5 truncate">Hardware Status</h3>
                 </div>
-                <span className={`text-[8px] shrink-0 font-black px-1.5 py-0.5 rounded uppercase border transition-colors ${currentStatus === 'Ready'
+                <span className={`text-[8px] shrink-0 font-black px-1.5 py-0.5 rounded uppercase border transition-colors whitespace-nowrap ${currentStatus === 'Ready'
                   ? 'bg-green-50 text-green-700 border-green-500'
                   : currentStatus === 'MEL'
                     ? 'bg-orange-50 text-orange-700 border-orange-400'
@@ -651,22 +773,22 @@ export default function EngineerDashboard() {
                   }`}>{currentStatus}</span>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 min-w-0">
                 <h4 className="text-xs font-black text-gray-900 truncate">Target Machine: {currentSimulator?.name ?? 'N/A'}</h4>
                 <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider truncate">{currentSimulator ? `${currentSimulator.typeRating} • STATUS: ${currentStatus}` : 'No simulator selected'}</p>
-                <div className={`mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-wider transition-colors ${isCurrentSimulatorSignedOffToday ? 'bg-green-50 text-green-700 border-green-400 shadow-sm' : 'bg-orange-50 text-orange-700 border-orange-300'}`}>
-                  <span className={`w-2 h-2 rounded-full ${isCurrentSimulatorSignedOffToday ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`} />
-                  <span>{isCurrentSimulatorSignedOffToday ? 'Daily Sign-Off Cleared' : 'Daily Sign-Off Pending'}</span>
+                <div className={`mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border text-[8px] font-black uppercase tracking-wider transition-colors max-w-full ${isCurrentSimulatorSignedOffToday ? 'bg-green-50 text-green-700 border-green-400 shadow-sm' : 'bg-orange-50 text-orange-700 border-orange-300'}`}>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${isCurrentSimulatorSignedOffToday ? 'bg-green-500' : 'bg-orange-500 animate-pulse'}`} />
+                  <span className="truncate">{isCurrentSimulatorSignedOffToday ? 'Daily Sign-Off Cleared' : 'Daily Sign-Off Pending'}</span>
                 </div>
               </div>
 
               <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2.5">
                 {hardwareComponents.map((comp, idx) => (
-                  <motion.div variants={listItem} key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 px-1 rounded hover:bg-gray-50 transition-colors">
-                    <span className="font-bold text-gray-800">{comp.label}</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`${comp.statusClass} font-black`}>{comp.value}</span>
-                      <span className={`w-2 h-2 rounded-full ${comp.dotClass}`} />
+                  <motion.div variants={listItem} key={idx} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-50 px-1 rounded hover:bg-gray-50 transition-colors gap-2 min-w-0">
+                    <span className="font-bold text-gray-800 truncate">{comp.label}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`${comp.statusClass} font-black whitespace-nowrap`}>{comp.value}</span>
+                      <span className={`w-2 h-2 rounded-full ${comp.dotClass} shrink-0`} />
                     </div>
                   </motion.div>
                 ))}
@@ -675,7 +797,7 @@ export default function EngineerDashboard() {
               <div className="space-y-3 pt-3 border-t border-gray-100">
                 <button
                   onClick={() => setShowAogModal(true)}
-                  className="w-full py-3 bg-brand-red hover:bg-red-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer active:scale-[0.98]"
+                  className="w-full py-3 bg-brand-red hover:bg-red-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer active:scale-[0.98] text-center whitespace-nowrap px-2 truncate"
                 >
                   Report Hardware Breakdown (AOG)
                 </button>
@@ -685,14 +807,14 @@ export default function EngineerDashboard() {
                     setShowResolveModal(true);
                   }}
                   disabled={!currentSimulator || isReadyStatus(currentSimulator.status)}
-                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-green-600 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]"
+                  className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest rounded transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-green-600 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98] text-center whitespace-nowrap px-2 truncate"
                 >
                   Resolve Defect
                 </button>
                 <button
                   onClick={handleSignOff}
                   disabled={maintPending}
-                  className="w-full py-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]"
+                  className="w-full py-3 bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 font-black text-xs uppercase tracking-widest rounded transition-all focus:outline-none focus:ring-2 focus:ring-gray-300 cursor-pointer disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98] text-center whitespace-nowrap px-2 truncate"
                 >
                   {maintPending ? 'Submitting Checklist...' : 'Sign-off Daily Maintenance'}
                 </button>
@@ -709,24 +831,24 @@ export default function EngineerDashboard() {
             initial="hidden"
             animate="show"
             exit="exit"
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
           >
             <motion.div
               variants={modalContent}
-              className="w-full max-w-md bg-white rounded border border-gray-200 shadow-2xl overflow-hidden"
+              className="w-full max-w-md bg-white rounded border border-gray-200 shadow-2xl overflow-hidden my-auto"
             >
-              <div className="p-5 border-b border-gray-100 flex items-center justify-between bg-red-50/50">
-                <div className="flex items-center gap-3">
+              <div className="p-4 sm:p-5 border-b border-gray-100 flex items-center justify-between bg-red-50/50 gap-2">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-full bg-brand-red flex items-center justify-center text-white shrink-0 shadow-sm">
                     <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
                   </div>
                   <div className="min-w-0">
-                    <h2 className="text-sm font-black uppercase text-gray-955 leading-none tracking-wider">
+                    <h2 className="text-xs sm:text-sm font-black uppercase text-gray-955 leading-none tracking-wider truncate">
                       Aircraft On Ground — AOG Report
                     </h2>
-                    <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 tracking-wide">
+                    <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 tracking-wide truncate">
                       {currentSimulator ? currentSimulator.name : 'Simulator'} · {currentTime.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </p>
                   </div>
@@ -738,7 +860,7 @@ export default function EngineerDashboard() {
                     setAffectedSystem('');
                     setFailureDescription('');
                   }}
-                  className="text-gray-400 hover:text-brand-red transition-colors shrink-0 active:scale-90"
+                  className="text-gray-400 hover:text-brand-red transition-colors shrink-0 active:scale-90 p-1"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -746,7 +868,7 @@ export default function EngineerDashboard() {
                 </button>
               </div>
 
-              <form onSubmit={handleAogSubmit} className="p-5 space-y-4">
+              <form onSubmit={handleAogSubmit} className="p-4 sm:p-5 space-y-4">
                 <div>
                   <label className="block text-[9px] font-black text-gray-500 uppercase tracking-wider mb-2">
                     Affected System
@@ -774,37 +896,37 @@ export default function EngineerDashboard() {
                     <button
                       type="button"
                       onClick={() => setSeverity('AOG')}
-                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'AOG'
+                      className={`p-2.5 sm:p-3 border rounded text-left transition-all relative active:scale-95 cursor-pointer ${severity === 'AOG'
                         ? 'border-brand-red bg-red-50 text-brand-red shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                      <span className="text-[10px] font-black uppercase tracking-wider block">AOG</span>
-                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Grounded</span>
+                      <span className="text-[10px] font-black uppercase tracking-wider block truncate">AOG</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none truncate">Grounded</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setSeverity('MEL')}
-                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'MEL'
+                      className={`p-2.5 sm:p-3 border rounded text-left transition-all relative active:scale-95 cursor-pointer ${severity === 'MEL'
                         ? 'border-orange-500 bg-orange-50 text-orange-600 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                      <span className="text-[10px] font-black uppercase tracking-wider block">MEL</span>
-                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Dispatch with limits</span>
+                      <span className="text-[10px] font-black uppercase tracking-wider block truncate">MEL</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none truncate">Limits</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setSeverity('Defect')}
-                      className={`p-3 border rounded text-left transition-all relative active:scale-95 ${severity === 'Defect'
+                      className={`p-2.5 sm:p-3 border rounded text-left transition-all relative active:scale-95 cursor-pointer ${severity === 'Defect'
                         ? 'border-yellow-500 bg-yellow-50 text-yellow-700 shadow-sm'
                         : 'border-gray-200 bg-white text-gray-900 hover:bg-gray-50'
                         }`}
                     >
-                      <span className="text-[10px] font-black uppercase tracking-wider block">Defect</span>
-                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none">Log & monitor</span>
+                      <span className="text-[10px] font-black uppercase tracking-wider block truncate">Defect</span>
+                      <span className="text-[8px] font-bold text-gray-400 block mt-0.5 leading-none truncate">Monitor</span>
                     </button>
                   </div>
                 </div>
@@ -852,10 +974,10 @@ export default function EngineerDashboard() {
                       : 'bg-yellow-600 hover:bg-yellow-700 focus:ring-2 focus:ring-yellow-600'
                     }`}
                 >
-                  <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <svg className="w-4 h-4 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
-                  <span>Submit {severity} Report</span>
+                  <span className="truncate">Submit {severity} Report</span>
                 </button>
               </form>
             </motion.div>
@@ -885,13 +1007,13 @@ export default function EngineerDashboard() {
             initial="hidden"
             animate="show"
             exit="exit"
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           >
             <motion.div
               variants={modalContent}
-              className="bg-white border border-gray-100 p-6 rounded shadow-2xl max-w-md w-full"
+              className="bg-white border border-gray-100 p-5 sm:p-6 rounded shadow-2xl max-w-md w-full my-auto"
             >
-              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4">
+              <h3 className="text-xs sm:text-sm font-black text-gray-900 uppercase tracking-widest mb-4 truncate">
                 Maintenance Shield Checklist Sign-Off
               </h3>
               <form onSubmit={handleSubmitMaintenanceSignOff} className="space-y-4">
@@ -915,9 +1037,9 @@ export default function EngineerDashboard() {
                     id="engineer-cleared"
                     checked={maintIsCleared}
                     onChange={(e) => setMaintIsCleared(e.target.checked)}
-                    className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red cursor-pointer"
+                    className="w-4 h-4 text-brand-red border-gray-300 rounded focus:ring-brand-red cursor-pointer shrink-0"
                   />
-                  <label htmlFor="engineer-cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer select-none">
+                  <label htmlFor="engineer-cleared" className="text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer select-none truncate">
                     Checklist Cleared (Raise Shield)
                   </label>
                 </div>
@@ -976,12 +1098,12 @@ export default function EngineerDashboard() {
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="fixed bottom-5 right-5 z-55 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded p-3 shadow-lg flex items-center gap-2"
+            className="fixed bottom-5 right-5 z-55 bg-green-50 border border-green-500 text-green-800 text-xs font-bold rounded p-3 shadow-lg flex items-center gap-2 max-w-sm"
           >
-            <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>{activeFault ? 'AOG breakdown report broadcasted.' : 'Defect resolved. Simulator status set to READY.'}</span>
+            <span className="truncate">{activeFault ? 'AOG breakdown report broadcasted.' : 'Defect resolved. Simulator status set to READY.'}</span>
           </motion.div>
         )}
       </AnimatePresence>
