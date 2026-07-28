@@ -68,6 +68,7 @@ export interface Instructor {
   name: string;
   ratings: string[];
   certifiedTypes: string[];
+  typeRatings?: string[];
   authorizedSyllabi: string[];
   status: string;
   employeeCode: string;
@@ -117,6 +118,8 @@ export interface SimulatorSession {
   engineerId?: string;
   syllabusId: string;
   traineeEmployeeCode: string;
+  traineeName?: string;
+  traineeRole?: 'Captain' | 'First Officer';
   isGraded: boolean;
   gradeStatus?: string;
   instructorNotes?: string;
@@ -126,6 +129,84 @@ export interface SimulatorSession {
 export interface ValidationGateErrorResponse {
   message: string;
   violations: string[];
+}
+
+export interface TimeDebtRecord {
+  pilotId?: string;
+  traineeName: string;
+  traineeEmployeeCode: string;
+  typeRating: string;
+  totalDebtMinutes: number;
+  terminatedSessionCount: number;
+  lastTerminationReason?: string;
+}
+
+export function calculateTimeDebts(
+  sessions: SimulatorSession[],
+  pilots: PilotPriority[] = []
+): TimeDebtRecord[] {
+  const debtMap = new Map<string, TimeDebtRecord>();
+
+  for (const s of sessions) {
+    if (s.status !== 'TerminatedEarly') continue;
+
+    let debtMinutes = 0;
+    if (s.originalEndTime && s.endTime) {
+      const orig = new Date(s.originalEndTime).getTime();
+      const actual = new Date(s.endTime).getTime();
+      if (!isNaN(orig) && !isNaN(actual) && orig > actual) {
+        debtMinutes = Math.round((orig - actual) / (1000 * 60));
+      }
+    }
+
+    if (debtMinutes <= 0) {
+      debtMinutes = 120;
+    }
+
+    const code = s.traineeEmployeeCode || s.captainId || 'UNKNOWN';
+    const pilotObj = pilots.find(
+      (p) => p.employeeCode === code || p.pilotId === s.captainId
+    );
+    const name =
+      s.traineeName ||
+      s.captainName ||
+      pilotObj?.fullName ||
+      `Trainee (${code})`;
+    const typeRating =
+      pilotObj?.typeRatings?.[0] ||
+      (s.syllabusId ? s.syllabusId.split('_')[0] : 'B737');
+
+    if (!debtMap.has(code)) {
+      debtMap.set(code, {
+        pilotId: pilotObj?.pilotId || s.captainId,
+        traineeName: name,
+        traineeEmployeeCode: code,
+        typeRating,
+        totalDebtMinutes: debtMinutes,
+        terminatedSessionCount: 1,
+        lastTerminationReason: s.terminationReason || 'Simulator AOG',
+      });
+    } else {
+      const existing = debtMap.get(code)!;
+      existing.totalDebtMinutes += debtMinutes;
+      existing.terminatedSessionCount += 1;
+      if (s.terminationReason) {
+        existing.lastTerminationReason = s.terminationReason;
+      }
+    }
+  }
+
+  return Array.from(debtMap.values()).sort(
+    (a, b) => b.totalDebtMinutes - a.totalDebtMinutes
+  );
+}
+
+export function formatDebtDuration(totalMinutes: number): string {
+  const hrs = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m owed`;
+  if (hrs > 0) return `${hrs}h 00m owed`;
+  return `${mins}m owed`;
 }
 
 export const getPilotsPriorityQueue = async (
@@ -388,5 +469,65 @@ export const checkoutEngineerShift = async (
     engineerId: response.data?.engineerId ?? valid,
     checkoutTime,
     verified: Boolean(response.data?.verified),
+  };
+};
+
+export interface DefectReport {
+  defectId: string;
+  simulatorId: string;
+  sessionId?: string | null;
+  reportedBy: string;
+  systemAffected: string;
+  severity: 'AOG' | 'MEL' | 'Defect';
+  instructorNotes: string;
+  status: 'Open' | 'Investigating' | 'Resolved';
+  resolutionNotes?: string | null;
+  reportedAt: string;
+  resolvedAt?: string | null;
+}
+
+export const submitDefectReport = async (
+  simulatorId: string,
+  payload: {
+    sessionId?: string | null;
+    reportedBy: string;
+    systemAffected: string;
+    severity: 'AOG' | 'MEL' | 'Defect';
+    instructorNotes: string;
+  }
+): Promise<{ defectId: string; simulatorId: string; severity: string; status: string }> => {
+  const valid = ensureUuid(simulatorId);
+  if (!valid) throw new Error('Invalid simulator id');
+  const response = await apiClient.post(`/api/asset/simulators/${valid}/defects`, payload);
+  return response.data;
+};
+
+export const getDefectReports = async (): Promise<DefectReport[]> => {
+  const response = await apiClient.get<any[]>('/api/asset/defects');
+  return response.data.map((d) => ({
+    defectId: d.defectId,
+    simulatorId: d.simulatorId,
+    sessionId: d.sessionId ?? null,
+    reportedBy: d.reportedBy,
+    systemAffected: d.systemAffected,
+    severity: d.severity as 'AOG' | 'MEL' | 'Defect',
+    instructorNotes: d.instructorNotes,
+    status: d.status as 'Open' | 'Investigating' | 'Resolved',
+    resolutionNotes: d.resolutionNotes ?? null,
+    reportedAt: normalizeUtcIso(d.reportedAt) ?? d.reportedAt,
+    resolvedAt: normalizeUtcIso(d.resolvedAt) ?? null,
+  }));
+};
+
+export const resolveDefectReport = async (
+  defectId: string,
+  resolutionNotes: string
+): Promise<{ defectId: string; resolvedAt?: string }> => {
+  const valid = ensureUuid(defectId);
+  if (!valid) throw new Error('Invalid defect id');
+  const response = await apiClient.post(`/api/asset/defects/${valid}/resolve`, { resolutionNotes });
+  return {
+    defectId: response.data?.defectId ?? valid,
+    resolvedAt: normalizeUtcIso(response.data?.resolvedAt),
   };
 };

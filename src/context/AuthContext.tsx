@@ -11,6 +11,7 @@ export interface User {
   email: string;
   employeeId: string;
   role: 'Admin' | 'Pilot' | 'Instructor' | 'Engineer';
+  typeRatings?: string[];
 }
 
 interface DecodedToken {

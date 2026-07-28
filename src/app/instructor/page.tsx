@@ -4,8 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { getSessions, publishSession, completeGrading, terminateSessionEarly, startSession, SimulatorSession } from '@/services/api';
+import { getSessions, publishSession, completeGrading, terminateSessionEarly, startSession, submitDefectReport, getDefectReports, getSimulators, SimulatorSession } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
+import GradeSummaryModal from '@/components/shared/GradeSummaryModal';
 
 interface ExtendedSession extends SimulatorSession {
   title: string;
@@ -14,7 +15,6 @@ interface ExtendedSession extends SimulatorSession {
   simulatorName: string;
 }
 
-// --- Framer Motion Variants ---
 const listContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
@@ -46,7 +46,6 @@ const slideInRight: Variants = {
   exit: { opacity: 0, x: 20, transition: { duration: 0.15 } }
 };
 
-// --- Utilities ---
 const startOfLocalDay = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate());
 
 const addLocalDays = (value: Date, days: number) =>
@@ -82,6 +81,14 @@ const getSessionDurationHours = (start?: string, end?: string) => {
   const endDate = toLocalDate(end);
   if (!startDate || !endDate) return 2;
   return Math.max(0.5, (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+};
+
+const getStartOfLocalWeek = (value: Date) => {
+  const dt = startOfLocalDay(value);
+  const day = dt.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  dt.setDate(dt.getDate() + diff);
+  return dt;
 };
 
 const getStatusBadgeStyle = (status: string) => {
@@ -126,7 +133,7 @@ export default function InstructorDashboard() {
   const [sessions, setSessions] = useState<ExtendedSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ExtendedSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => startOfLocalDay(new Date()));
+  const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => getStartOfLocalWeek(new Date()));
 
   const [techSkills, setTechSkills] = useState('');
   const [crmTeamwork, setCrmTeamwork] = useState('');
@@ -139,6 +146,16 @@ export default function InstructorDashboard() {
   const [terminateActualEndHour, setTerminateActualEndHour] = useState('10');
   const [terminateActualEndMin, setTerminateActualEndMin] = useState('00');
   const [terminateError, setTerminateError] = useState<string | null>(null);
+
+  const [showFaultModal, setShowFaultModal] = useState(false);
+  const [faultSystem, setFaultSystem] = useState('');
+  const [faultSeverity, setFaultSeverity] = useState<'AOG' | 'MEL' | 'Defect'>('AOG');
+  const [faultNotes, setFaultNotes] = useState('');
+  const [faultSubmitting, setFaultSubmitting] = useState(false);
+  const [faultError, setFaultError] = useState<string | null>(null);
+  const [lockedSimIds, setLockedSimIds] = useState<Set<string>>(new Set());
+  const [showGradeModal, setShowGradeModal] = useState(false);
+  const [gradeModalSession, setGradeModalSession] = useState<ExtendedSession | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -172,16 +189,37 @@ export default function InstructorDashboard() {
           )
         );
       };
+      const handleDefectReported = (payload: { simulatorId: string; severity: string }) => {
+        if (payload.severity === 'AOG') {
+          setLockedSimIds((prev) => new Set(prev).add(payload.simulatorId));
+        }
+      };
+      const handleDefectResolved = (payload: { simulatorId: string }) => {
+        setLockedSimIds((prev) => {
+          const next = new Set(prev);
+          next.delete(payload.simulatorId);
+          return next;
+        });
+      };
       hub.on('SessionGraded', handleSessionGraded);
+      hub.on('DefectReported', handleDefectReported);
+      hub.on('DefectResolved', handleDefectResolved);
       return () => {
         hub.off('SessionGraded', handleSessionGraded);
+        hub.off('DefectReported', handleDefectReported);
+        hub.off('DefectResolved', handleDefectResolved);
       };
     }
   }, [user, authLoading, router]);
 
   const loadData = async () => {
     try {
-      const rawSessions = await getSessions();
+      const [rawSessions, defects, sims] = await Promise.all([getSessions(), getDefectReports(), getSimulators()]);
+      const locked = new Set<string>();
+      defects.filter((d) => d.severity === 'AOG' && d.status !== 'Resolved').forEach((d) => locked.add(d.simulatorId));
+      sims.filter((s) => s.status === 'AOG' || s.status === 'Down').forEach((s) => locked.add(s.id));
+      setLockedSimIds(locked);
+
       const mapped: ExtendedSession[] = rawSessions.map((s) => {
         const syllabusLabel = s.syllabusId
           ? s.syllabusId.replace(/([A-Z])/g, ' $1').trim()
@@ -191,9 +229,11 @@ export default function InstructorDashboard() {
           startHour < 9 ? 'Phase 1' :
             startHour < 12 ? 'Phase 2' :
               startHour < 15 ? 'Phase 3' : 'Phase 4';
-        const captain = s.captainName || (s.captainId ? `Captain ${s.captainId.substring(0, 6)}` : 'Unassigned');
-        const fo = s.firstOfficerName || (s.firstOfficerId ? `FO ${s.firstOfficerId.substring(0, 6)}` : 'Unassigned');
-        const pilotName = s.traineeEmployeeCode ? `${s.traineeEmployeeCode} • ${captain}` : `${captain} / ${fo}`;
+        const traineeName = s.traineeName || 'Unassigned';
+        const traineeRole = s.traineeRole || '';
+        const pilotName = s.traineeEmployeeCode
+          ? `${s.traineeEmployeeCode} • ${traineeName}${traineeRole ? ` (${traineeRole})` : ''}`
+          : traineeName;
         return {
           ...s,
           title: syllabusLabel,
@@ -215,6 +255,35 @@ export default function InstructorDashboard() {
       console.error('[Instructor] Failed to load sessions:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFaultSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSession) return;
+    setFaultSubmitting(true);
+    setFaultError(null);
+    try {
+      await submitDefectReport(selectedSession.simulatorId, {
+        sessionId: selectedSession.sessionId,
+        reportedBy: user?.name || 'Instructor',
+        systemAffected: faultSystem,
+        severity: faultSeverity,
+        instructorNotes: faultNotes,
+      });
+      setShowFaultModal(false);
+      setFaultSystem('');
+      setFaultNotes('');
+      if (faultSeverity === 'AOG') {
+        handleOpenTerminateModal();
+        setTerminateReason('Simulator AOG');
+      } else {
+        alert(`${faultSeverity} report filed successfully.`);
+      }
+    } catch (err: any) {
+      setFaultError(err?.response?.data?.error || 'Failed to submit defect report.');
+    } finally {
+      setFaultSubmitting(false);
     }
   };
 
@@ -287,12 +356,12 @@ export default function InstructorDashboard() {
 
   if (authLoading || !user || !mounted || loading) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
-          className="text-sm font-bold uppercase tracking-widest text-brand-red"
+          className="text-sm font-bold uppercase tracking-widest text-brand-red text-center"
         >
           Loading Instructor Portal...
         </motion.div>
@@ -300,28 +369,34 @@ export default function InstructorDashboard() {
     );
   }
 
-  const visibleDayCount = 14;
+  const visibleDayCount = 7;
   const visibleDays = Array.from({ length: visibleDayCount }, (_, idx) => addLocalDays(calendarStartDate, idx));
   const visibleDayKeys = new Set(visibleDays.map(toLocalDateKey));
   const visibleSessions = sessions.filter((s) => {
     const start = toLocalDate(s.startTime);
     if (!start) return false;
-    return visibleDayKeys.has(toLocalDateKey(start));
+    if (!visibleDayKeys.has(toLocalDateKey(start))) return false;
+    const instructorMatch =
+      s.instructorId && user?.id && s.instructorId === user.id;
+    const nameMatch =
+      s.instructorName && user?.name &&
+      s.instructorName.toLowerCase().includes(user.name.split(' ').pop()!.toLowerCase());
+    return !!(instructorMatch || nameMatch || !s.instructorId);
   });
   const calendarRangeLabel = formatCalendarRange(calendarStartDate, visibleDayCount);
 
   const goToPreviousWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, -visibleDayCount));
   const goToNextWindow = () => setCalendarStartDate((prev) => addLocalDays(prev, visibleDayCount));
-  const goToTodayWindow = () => setCalendarStartDate(startOfLocalDay(new Date()));
+  const goToTodayWindow = () => setCalendarStartDate(getStartOfLocalWeek(new Date()));
 
   const visibleCount = visibleSessions.length;
   const pendingCount = visibleSessions.filter(s => s.status === 'Scheduled' || s.status === 'Draft').length;
   const completedCount = visibleSessions.filter(s => s.status === 'Completed').length;
 
   return (
-    <div className="h-screen flex flex-col bg-white text-gray-900 overflow-hidden font-sans w-full">
-      <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-30 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
-        <div className="flex items-center gap-6 min-w-0">
+    <div className="h-screen w-full flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
+      <header className="min-h-[4rem] border-b border-gray-200 bg-white flex flex-wrap items-center justify-between px-4 sm:px-6 py-2 gap-2 shrink-0 z-30 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)]">
+        <div className="flex items-center gap-3 sm:gap-6 min-w-0">
           <div className="flex items-center gap-2">
             <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
             <div className="flex flex-col min-w-0">
@@ -331,15 +406,15 @@ export default function InstructorDashboard() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="hidden md:flex flex-col text-right">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          <div className="hidden md:flex flex-col text-right min-w-0">
             <span className="text-xs font-black text-gray-955 uppercase leading-none truncate">{user.name}</span>
             <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Type Rating Instructor • TRI/TRE</span>
           </div>
           <div className="w-8 h-8 rounded-full bg-brand-red text-white flex items-center justify-center font-black text-xs shrink-0 transition-transform hover:scale-110">
             {user.name.split(' ').map(n => n[0]).join('').substring(0, 2)}
           </div>
-          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 ml-1 active:scale-90">
+          <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 ml-1 active:scale-90 p-1">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
             </svg>
@@ -347,32 +422,32 @@ export default function InstructorDashboard() {
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        <aside className="w-[20%] border-r border-gray-200 p-4 space-y-6 overflow-y-auto shrink-0 bg-white shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-w-0">
+        <aside className="w-full lg:w-[22%] xl:w-[20%] border-b lg:border-b-0 lg:border-r border-gray-200 p-4 space-y-4 sm:space-y-6 overflow-y-auto shrink-0 bg-white shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             className="grid grid-cols-3 gap-2"
           >
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Window</span>
-              <span className="text-lg font-black text-gray-955 mt-1 block">{visibleCount}</span>
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Window</span>
+              <span className="text-base sm:text-lg font-black text-gray-955 mt-0.5 sm:mt-1 block">{visibleCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Pending</span>
-              <span className="text-lg font-black text-brand-red mt-1 block">{pendingCount}</span>
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Pending</span>
+              <span className="text-base sm:text-lg font-black text-brand-red mt-0.5 sm:mt-1 block">{pendingCount}</span>
             </div>
-            <div className="border border-gray-150 p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
-              <span className="text-[10px] text-gray-400 font-bold block uppercase">Done</span>
-              <span className="text-lg font-black text-green-600 mt-1 block">{completedCount}</span>
+            <div className="border border-gray-150 p-2 sm:p-2.5 rounded text-center bg-white shadow-sm hover:shadow-md transition-shadow">
+              <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold block uppercase truncate">Done</span>
+              <span className="text-base sm:text-lg font-black text-green-600 mt-0.5 sm:mt-1 block">{completedCount}</span>
             </div>
           </motion.div>
 
           <div className="space-y-3">
             <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-red" /> All Sessions
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-red shrink-0" /> All Sessions
             </div>
-            <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2">
+            <motion.div variants={listContainer} initial="hidden" animate="show" className="space-y-2 max-h-[300px] lg:max-h-none overflow-y-auto pr-1">
               {visibleSessions.map(s => {
                 const localStart = toLocalDate(s.startTime);
                 const timeLabel = localStart
@@ -384,7 +459,14 @@ export default function InstructorDashboard() {
                   <motion.div
                     variants={listItem}
                     key={s.sessionId}
-                    onClick={() => setSelectedSession(s)}
+                    onClick={() => {
+                      if (s.status === 'Completed') {
+                        setGradeModalSession(s);
+                        setShowGradeModal(true);
+                      } else {
+                        setSelectedSession(s);
+                      }
+                    }}
                     className={`p-3 border rounded bg-white cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] ${selectedSession?.sessionId === s.sessionId
                       ? 'border-brand-red shadow-sm'
                       : 'border-gray-150 hover:border-gray-300'
@@ -392,9 +474,9 @@ export default function InstructorDashboard() {
                   >
                     <div className="text-xs font-black text-gray-900 truncate">{s.title}</div>
                     <div className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{s.pilotName}</div>
-                    <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2">
-                      <span>{timeLabel} • {s.phase}</span>
-                      <span className={`px-1.5 py-0.5 rounded border leading-none font-bold transition-colors ${style.badge}`}>
+                    <div className="flex items-center justify-between text-[8px] text-gray-400 font-black uppercase mt-2 gap-2">
+                      <span className="truncate">{timeLabel} • {s.phase}</span>
+                      <span className={`px-1.5 py-0.5 rounded border leading-none font-bold transition-colors shrink-0 whitespace-nowrap ${style.badge}`}>
                         {style.label}
                       </span>
                     </div>
@@ -405,40 +487,40 @@ export default function InstructorDashboard() {
           </div>
         </aside>
 
-        <section className="w-[55%] p-6 overflow-y-auto bg-gray-50/30 border-r border-gray-200 flex flex-col">
+        <section className="w-full lg:w-[53%] xl:w-[55%] p-4 sm:p-6 overflow-y-auto bg-gray-50/30 border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col min-w-0">
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="border border-gray-150 rounded p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden hover:shadow-md transition-shadow"
+            className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm flex-1 flex flex-col overflow-hidden hover:shadow-md transition-shadow"
           >
-            <div className="flex items-center justify-between mb-4 shrink-0 min-w-0">
+            <div className="flex flex-wrap items-center justify-between mb-4 shrink-0 min-w-0 gap-2">
               <div className="min-w-0">
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider truncate">14-Day Schedule</h3>
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{calendarRangeLabel}</p>
+                <h3 className="text-xs sm:text-sm font-black uppercase text-gray-900 tracking-wider truncate">7-Day Schedule</h3>
+                <p className="text-[9px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5 truncate">{calendarRangeLabel}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={goToPreviousWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  Prev 14d
+                  Prev Week
                 </button>
                 <button
                   onClick={goToTodayWindow}
-                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 active:scale-95 transition-all cursor-pointer"
+                  className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
                   Today
                 </button>
                 <button
                   onClick={goToNextWindow}
-                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer"
+                  className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
                 >
-                  Next 14d
+                  Next Week
                 </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto flex-1 flex flex-col border border-gray-100 rounded">
+            <div className="overflow-x-auto flex-1 flex flex-col border border-gray-100 rounded min-w-0">
               <div className="min-w-[1000px] flex flex-col flex-1">
                 <div
                   className="grid bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3 shrink-0"
@@ -471,13 +553,39 @@ export default function InstructorDashboard() {
 
                     {visibleDays.map((day) => {
                       const dayKey = toLocalDateKey(day);
+                      const daySessions = visibleSessions.filter((s) => {
+                        const startDate = toLocalDate(s.startTime);
+                        return !!startDate && toLocalDateKey(startDate) === dayKey;
+                      });
+
+                      const columnOf: Record<string, number> = {};
+                      const totalColumnsOf: Record<string, number> = {};
+                      const sorted = [...daySessions].sort(
+                        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+                      );
+                      sorted.forEach((s) => {
+                        const sStart = new Date(s.startTime).getTime();
+                        const sEnd = new Date(s.endTime || s.startTime).getTime();
+                        const overlapping = sorted.filter((o) => {
+                          if (o.sessionId === s.sessionId) return false;
+                          const oStart = new Date(o.startTime).getTime();
+                          const oEnd = new Date(o.endTime || o.startTime).getTime();
+                          return sStart < oEnd && sEnd > oStart;
+                        });
+                        const usedCols = new Set(overlapping.map((o) => columnOf[o.sessionId]).filter((c) => c !== undefined));
+                        let col = 0;
+                        while (usedCols.has(col)) col++;
+                        columnOf[s.sessionId] = col;
+                        const group = [s, ...overlapping];
+                        const maxCol = Math.max(...group.map((g) => columnOf[g.sessionId] ?? 0)) + 1;
+                        group.forEach((g) => {
+                          totalColumnsOf[g.sessionId] = Math.max(totalColumnsOf[g.sessionId] ?? 1, maxCol);
+                        });
+                      });
 
                       return (
                         <div key={dayKey} className="relative border-r border-gray-50 last:border-r-0 h-full">
-                          {visibleSessions.filter(s => {
-                            const startDate = toLocalDate(s.startTime);
-                            return !!startDate && toLocalDateKey(startDate) === dayKey;
-                          }).map(s => {
+                          {daySessions.map((s) => {
                             const startDate = toLocalDate(s.startTime);
                             if (!startDate) return null;
                             const startHour = startDate.getHours();
@@ -488,23 +596,38 @@ export default function InstructorDashboard() {
 
                             if (topOffset < 0 || topOffset > 455) return null;
 
+                            const col = columnOf[s.sessionId] ?? 0;
+                            const total = totalColumnsOf[s.sessionId] ?? 1;
+                            const widthPct = 100 / total;
+                            const leftPct = col * widthPct;
+
                             return (
                               <motion.div
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
-                                whileHover={{ scale: 1.05, zIndex: 30 }}
+                                whileHover={{ scale: 1.03, zIndex: 30 }}
                                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                                 key={s.sessionId}
                                 onClick={() => setSelectedSession(s)}
                                 style={{
                                   top: `${topOffset}px`,
                                   height: `${height - 2}px`,
+                                  left: `calc(${leftPct}% + 2px)`,
+                                  width: `calc(${widthPct}% - 4px)`,
                                 }}
-                                className={`absolute left-0.5 right-0.5 p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-colors z-20 active:scale-95 ${selectedSession?.sessionId === s.sessionId
-                                  ? 'bg-brand-red border border-red-800 font-black'
-                                  : s.status === 'TerminatedEarly'
-                                    ? 'bg-purple-600 border border-purple-800 font-bold'
-                                    : 'bg-gray-400 hover:bg-gray-500 font-medium'
+                                className={`absolute p-1 rounded cursor-pointer text-white flex flex-col justify-between overflow-hidden shadow-sm transition-colors active:scale-95 ${selectedSession?.sessionId === s.sessionId
+                                    ? 'bg-brand-red border border-red-800 font-black z-30'
+                                    : s.status === 'Scheduled' || s.status === 'Draft'
+                                      ? 'bg-blue-500 hover:bg-blue-600 border border-blue-700 font-bold z-20'
+                                      : s.status === 'InProgress'
+                                        ? 'bg-green-600 hover:bg-green-700 border border-green-800 font-bold z-20 animate-pulse'
+                                        : s.status === 'Completed'
+                                          ? 'bg-teal-600 hover:bg-teal-700 border border-teal-800 font-bold z-20'
+                                          : s.status === 'TerminatedEarly'
+                                            ? 'bg-purple-600 hover:bg-purple-700 border border-purple-800 font-bold z-20'
+                                            : s.status === 'Cancelled'
+                                              ? 'bg-gray-300 hover:bg-gray-400 border border-gray-400 font-medium z-10 opacity-70'
+                                              : 'bg-blue-500 hover:bg-blue-600 border border-blue-700 font-medium z-20'
                                   }`}
                               >
                                 <div className="min-w-0">
@@ -525,7 +648,7 @@ export default function InstructorDashboard() {
           </motion.div>
         </section>
 
-        <aside className="w-[25%] p-6 overflow-y-auto bg-white space-y-6 shrink-0 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
+        <aside className="w-full lg:w-[25%] p-4 sm:p-6 overflow-y-auto bg-white space-y-6 shrink-0 shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10">
           <AnimatePresence mode="wait">
             {selectedSession ? (
               <motion.form
@@ -535,27 +658,47 @@ export default function InstructorDashboard() {
                 animate="show"
                 exit="exit"
                 onSubmit={handleSubmitSyllabus}
-                className="border border-gray-150 rounded p-6 bg-white shadow-sm space-y-6 hover:shadow-md transition-shadow"
+                className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm space-y-6 hover:shadow-md transition-shadow"
               >
                 <div className="space-y-4 border-b border-gray-100 pb-4 min-w-0">
-                  <div className="flex items-center justify-between gap-2 min-w-0">
-                    <span className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase transition-colors shrink-0 ${getStatusBadgeStyle(selectedSession.status).badge}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
+                    <span className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase transition-colors shrink-0 whitespace-nowrap ${getStatusBadgeStyle(selectedSession.status).badge}`}>
                       {getStatusBadgeStyle(selectedSession.status).label}
                     </span>
-                    <AnimatePresence>
-                      {(selectedSession.status === 'InProgress' || selectedSession.status === 'Scheduled') && (
-                        <motion.button
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.9 }}
-                          type="button"
-                          onClick={handleOpenTerminateModal}
-                          className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-sm"
-                        >
-                          Terminate Early
-                        </motion.button>
-                      )}
-                    </AnimatePresence>
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                      <AnimatePresence>
+                        {(selectedSession.status === 'InProgress' || selectedSession.status === 'Scheduled') && (
+                          <>
+                            <motion.button
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.9 }}
+                              type="button"
+                              onClick={() => {
+                                setFaultSystem('');
+                                setFaultNotes('');
+                                setFaultSeverity('AOG');
+                                setFaultError(null);
+                                setShowFaultModal(true);
+                              }}
+                              className="bg-brand-red hover:bg-red-700 active:scale-95 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-all cursor-pointer shadow-sm whitespace-nowrap"
+                            >
+                              Report Fault
+                            </motion.button>
+                            <motion.button
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.9 }}
+                              type="button"
+                              onClick={handleOpenTerminateModal}
+                              className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-[8px] font-black px-2 py-1 rounded uppercase tracking-wider transition-all cursor-pointer shadow-sm whitespace-nowrap"
+                            >
+                              Terminate Early
+                            </motion.button>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   </div>
 
                   <AnimatePresence>
@@ -566,7 +709,7 @@ export default function InstructorDashboard() {
                         exit={{ opacity: 0, height: 0 }}
                         type="button"
                         onClick={handleStartSession}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black py-2 px-3 rounded text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-sm overflow-hidden"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black py-2 px-3 rounded text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-sm overflow-hidden text-center whitespace-nowrap"
                       >
                         Start Session
                       </motion.button>
@@ -581,7 +724,7 @@ export default function InstructorDashboard() {
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: 'auto' }}
-                        className="p-2 bg-purple-50 border border-purple-200 text-purple-800 rounded text-[9px] font-bold overflow-hidden"
+                        className="p-2 bg-purple-50 border border-purple-200 text-purple-800 rounded text-[9px] font-bold overflow-hidden break-words"
                       >
                         Termination Reason: {selectedSession.terminationReason}
                       </motion.div>
@@ -590,12 +733,12 @@ export default function InstructorDashboard() {
 
                   <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-[10px] pt-1 min-w-0">
                     <div className="min-w-0">
-                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Captain</span>
-                      <span className="font-black text-gray-900 truncate block">{selectedSession.captainName || (selectedSession.captainId ? selectedSession.captainId.substring(0, 8) : 'Unassigned')}</span>
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Trainee</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.traineeName || selectedSession.traineeEmployeeCode || 'Unassigned'}</span>
                     </div>
                     <div className="min-w-0">
-                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">First Officer</span>
-                      <span className="font-black text-gray-900 truncate block">{selectedSession.firstOfficerName || (selectedSession.firstOfficerId ? selectedSession.firstOfficerId.substring(0, 8) : 'Unassigned')}</span>
+                      <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Trainee Role</span>
+                      <span className="font-black text-gray-900 truncate block">{selectedSession.traineeRole || '—'}</span>
                     </div>
                     <div className="min-w-0">
                       <span className="text-gray-450 block font-bold uppercase tracking-wider text-[8px] truncate">Instructor</span>
@@ -623,7 +766,7 @@ export default function InstructorDashboard() {
                     <svg className="w-4 h-4 text-brand-red shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                     </svg>
-                    <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider">Session Details & Grading</h4>
+                    <h4 className="text-xs font-black uppercase text-gray-900 tracking-wider truncate">Session Details & Grading</h4>
                   </div>
                   <p className="text-[9px] text-gray-455 font-bold uppercase">Record observations, grades, and teaching notes for this session.</p>
 
@@ -643,7 +786,7 @@ export default function InstructorDashboard() {
                   <fieldset disabled={selectedSession.status !== 'InProgress'} className="space-y-4 transition-opacity duration-200 disabled:opacity-75">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Technical Skills</label>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1 truncate">Technical Skills</label>
                         <select
                           value={techSkills}
                           onChange={(e) => setTechSkills(e.target.value)}
@@ -659,7 +802,7 @@ export default function InstructorDashboard() {
                       </div>
 
                       <div>
-                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">CRM / Teamwork</label>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1 truncate">CRM / Teamwork</label>
                         <select
                           value={crmTeamwork}
                           onChange={(e) => setCrmTeamwork(e.target.value)}
@@ -675,7 +818,7 @@ export default function InstructorDashboard() {
                       </div>
 
                       <div>
-                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">SOP Adherence</label>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1 truncate">SOP Adherence</label>
                         <select
                           value={sopAdherence}
                           onChange={(e) => setSopAdherence(e.target.value)}
@@ -691,7 +834,7 @@ export default function InstructorDashboard() {
                       </div>
 
                       <div>
-                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Overall Grade</label>
+                        <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1 truncate">Overall Grade</label>
                         <select
                           value={overallGrade}
                           onChange={(e) => setOverallGrade(e.target.value)}
@@ -725,14 +868,14 @@ export default function InstructorDashboard() {
                     type="button"
                     disabled={selectedSession.status !== 'InProgress'}
                     onClick={() => alert('Draft saved successfully.')}
-                    className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] focus:outline-none cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                    className="w-1/2 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-350 font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] focus:outline-none cursor-pointer disabled:opacity-50 disabled:pointer-events-none truncate"
                   >
                     Save Draft
                   </button>
                   <button
                     type="submit"
                     disabled={selectedSession.status !== 'InProgress'}
-                    className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                    className="w-1/2 py-2.5 bg-brand-red hover:bg-red-700 text-white font-black text-[10px] uppercase tracking-wider rounded transition-all active:scale-[0.98] shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-red cursor-pointer disabled:opacity-50 disabled:pointer-events-none truncate"
                   >
                     Submit Syllabus
                   </button>
@@ -759,20 +902,20 @@ export default function InstructorDashboard() {
             initial="hidden"
             animate="show"
             exit="exit"
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto"
           >
             <motion.div
               variants={modalContent}
-              className="bg-white rounded p-6 max-w-md w-full border border-gray-200 shadow-2xl space-y-4"
+              className="bg-white rounded p-5 sm:p-6 max-w-md w-full border border-gray-200 shadow-2xl space-y-4 my-auto"
             >
               <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                <h3 className="text-sm font-black uppercase text-gray-900 tracking-wider">
+                <h3 className="text-xs sm:text-sm font-black uppercase text-gray-900 tracking-wider truncate">
                   Terminate Session Early
                 </h3>
                 <button
                   type="button"
                   onClick={() => setShowTerminateModal(false)}
-                  className="text-xs font-black text-gray-400 hover:text-brand-red uppercase transition-colors active:scale-90"
+                  className="text-xs font-black text-gray-400 hover:text-brand-red uppercase transition-colors active:scale-90 cursor-pointer p-1"
                 >
                   Cancel
                 </button>
@@ -780,7 +923,7 @@ export default function InstructorDashboard() {
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-800 font-bold space-y-1 shadow-sm">
                 <span className="font-black uppercase block text-amber-900">Warning</span>
-                <p>This will log the completed hours and instantly release the remaining schedule block.</p>
+                <p className="break-words">This will log the completed hours and instantly release the remaining schedule block.</p>
               </div>
 
               <form onSubmit={handleConfirmTerminateEarly} className="space-y-4">
@@ -832,7 +975,7 @@ export default function InstructorDashboard() {
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded overflow-hidden"
+                      className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded overflow-hidden break-words"
                     >
                       {terminateError}
                     </motion.div>
@@ -843,13 +986,13 @@ export default function InstructorDashboard() {
                   <button
                     type="button"
                     onClick={() => setShowTerminateModal(false)}
-                    className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer active:scale-95 transition-all"
+                    className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer active:scale-95 transition-all truncate"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-all active:scale-95 shadow-md"
+                    className="w-1/2 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase rounded cursor-pointer transition-all active:scale-95 shadow-md truncate"
                   >
                     Confirm Termination
                   </button>
@@ -859,6 +1002,177 @@ export default function InstructorDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {showFaultModal && selectedSession && (
+          <motion.div
+            variants={modalBackdrop}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto"
+          >
+            <motion.div
+              variants={modalContent}
+              className="bg-white rounded p-5 sm:p-6 max-w-md w-full border border-gray-200 shadow-2xl space-y-4 my-auto"
+            >
+              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                <div className="min-w-0">
+                  <h3 className="text-xs sm:text-sm font-black uppercase text-gray-900 tracking-wider truncate">
+                    Report Hardware Fault
+                  </h3>
+                  <p className="text-[9px] font-bold text-gray-400 uppercase mt-0.5 truncate">
+                    {selectedSession.simulatorName} · {selectedSession.title}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFaultModal(false)}
+                  className="text-xs font-black text-gray-400 hover:text-brand-red uppercase transition-colors active:scale-90 cursor-pointer p-1"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <form onSubmit={handleFaultSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    System Affected
+                  </label>
+                  <select
+                    required
+                    value={faultSystem}
+                    onChange={(e) => setFaultSystem(e.target.value)}
+                    className="w-full text-xs font-bold text-gray-900 border border-gray-300 rounded p-2 bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors"
+                  >
+                    <option value="">Select system...</option>
+                    <option value="Motion System">Motion System</option>
+                    <option value="Visual System">Visual System</option>
+                    <option value="Avionics & Instruments">Avionics & Instruments</option>
+                    <option value="Flight Controls">Flight Controls</option>
+                    <option value="Host Computer">Host Computer</option>
+                    <option value="Hydraulic System">Hydraulic System</option>
+                    <option value="Comms / Audio">Comms / Audio</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Severity Level
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFaultSeverity('AOG')}
+                      className={`p-2.5 border rounded text-left transition-all cursor-pointer active:scale-95 ${faultSeverity === 'AOG'
+                        ? 'border-brand-red bg-red-50 text-brand-red font-black shadow-sm'
+                        : 'border-gray-200 bg-white text-gray-700 font-bold hover:bg-gray-50'
+                        }`}
+                    >
+                      <span className="text-[10px] uppercase block leading-none truncate">AOG</span>
+                      <span className="text-[7.5px] opacity-75 uppercase block mt-1 leading-tight truncate">Grounds Sim</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFaultSeverity('MEL')}
+                      className={`p-2.5 border rounded text-left transition-all cursor-pointer active:scale-95 ${faultSeverity === 'MEL'
+                        ? 'border-orange-500 bg-orange-50 text-orange-700 font-black shadow-sm'
+                        : 'border-gray-200 bg-white text-gray-700 font-bold hover:bg-gray-50'
+                        }`}
+                    >
+                      <span className="text-[10px] uppercase block leading-none truncate">MEL</span>
+                      <span className="text-[7.5px] opacity-75 uppercase block mt-1 leading-tight truncate">With Limits</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFaultSeverity('Defect')}
+                      className={`p-2.5 border rounded text-left transition-all cursor-pointer active:scale-95 ${faultSeverity === 'Defect'
+                        ? 'border-yellow-500 bg-yellow-50 text-yellow-800 font-black shadow-sm'
+                        : 'border-gray-200 bg-white text-gray-700 font-bold hover:bg-gray-50'
+                        }`}
+                    >
+                      <span className="text-[10px] uppercase block leading-none truncate">Defect</span>
+                      <span className="text-[7.5px] opacity-75 uppercase block mt-1 leading-tight truncate">Minor Log</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">
+                    Instructor Technical Notes
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={faultNotes}
+                    onChange={(e) => setFaultNotes(e.target.value)}
+                    placeholder="Describe exact symptoms, error codes, or failure observations..."
+                    className="w-full text-xs font-bold text-gray-900 p-2.5 border border-gray-300 rounded bg-white focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-colors resize-none"
+                  />
+                </div>
+
+                <AnimatePresence>
+                  {faultSeverity === 'AOG' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-2.5 bg-red-50 border border-red-200 text-brand-red text-[9px] font-bold rounded overflow-hidden break-words"
+                    >
+                      ⚠️ Filing an AOG defect will instantly lock the simulator and launch early session termination.
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                  {faultError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-2 bg-red-50 border border-red-200 text-brand-red text-[10px] font-bold rounded overflow-hidden break-words"
+                    >
+                      {faultError}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowFaultModal(false)}
+                    className="w-1/2 py-2 border border-gray-300 text-gray-700 text-xs font-black uppercase rounded hover:bg-gray-50 cursor-pointer active:scale-95 transition-all truncate"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={faultSubmitting}
+                    className={`w-1/2 py-2 text-white text-xs font-black uppercase rounded cursor-pointer transition-all active:scale-95 shadow-md disabled:opacity-50 truncate ${faultSeverity === 'AOG'
+                      ? 'bg-brand-red hover:bg-red-700'
+                      : faultSeverity === 'MEL'
+                        ? 'bg-orange-500 hover:bg-orange-600'
+                        : 'bg-yellow-600 hover:bg-yellow-700'
+                      }`}
+                  >
+                    {faultSubmitting ? 'Submitting...' : `Submit ${faultSeverity}`}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {showGradeModal && gradeModalSession && (
+        <GradeSummaryModal
+          session={gradeModalSession}
+          onClose={() => {
+            setShowGradeModal(false);
+            setGradeModalSession(null);
+          }}
+        />
+      )}
     </div>
   );
 }
