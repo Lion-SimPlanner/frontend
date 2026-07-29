@@ -89,6 +89,24 @@ const formatLocalDateTime = (value?: string) => {
 
 const isReadyStatus = (status: Simulator['status']) => status === 'Ready' || status === 'Up';
 
+const defectSeverityBadgeClass = (severity: DefectReport['severity']) => {
+  if (severity === 'AOG') return 'bg-red-100 text-brand-red border-red-300';
+  if (severity === 'MEL') return 'bg-orange-100 text-orange-800 border-orange-300';
+  return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+};
+
+const formatDowntimeDuration = (reportedAt?: string, resolvedAt?: string | null) => {
+  const start = toLocalDate(reportedAt);
+  const end = toLocalDate(resolvedAt ?? undefined);
+  if (!start || !end) return null;
+  const diffMs = end.getTime() - start.getTime();
+  if (diffMs < 0) return null;
+  const totalMinutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+};
+
 const normalizeStatusLabel = (status: Simulator['status']) => {
   if (status === 'Up') return 'Ready';
   if (status === 'Down') return 'AOG';
@@ -185,8 +203,14 @@ export default function EngineerDashboard() {
         loadData();
       };
 
-      const handleDefectResolved = (payload: { defectId: string; simulatorId: string }) => {
-        setDefects((prev) => prev.filter((d) => d.defectId !== payload.defectId));
+      const handleDefectResolved = (payload: { defectId: string; simulatorId: string; resolvedAt?: string }) => {
+        setDefects((prev) =>
+          prev.map((d) =>
+            d.defectId === payload.defectId
+              ? { ...d, status: 'Resolved', resolvedAt: payload.resolvedAt ?? new Date().toISOString() }
+              : d
+          )
+        );
         loadData();
       };
 
@@ -208,7 +232,7 @@ export default function EngineerDashboard() {
         getSimulators(),
         getEngineers(),
         getSessions(),
-        getDefectReports(),
+        getDefectReports(true),
       ]);
       setSimulators(sims);
       setEngineers(engs);
@@ -228,13 +252,35 @@ export default function EngineerDashboard() {
       const status = severity;
       const targetSimId = currentSimulator?.id ?? '';
       if (!targetSimId) throw new Error('No simulator selected for AOG report');
-      await setSimulatorStatus(targetSimId, status, `[${severity}] [${affectedSystem}] ${failureDescription}`);
+      const capturedSystem = affectedSystem;
+      const capturedDescription = failureDescription;
+      await setSimulatorStatus(targetSimId, status, `[${severity}] [${capturedSystem}] ${capturedDescription}`);
       setActiveFault(true);
       setShowAogModal(false);
       setAffectedSystem('');
       setFailureDescription('');
       setShowSuccessToast(true);
       await loadData();
+      // Optimistic UI: immediately show the report as a local defect entry.
+      // The backend's setSimulatorStatus writes to MaintenanceLogs (not the
+      // Defects table), so getDefectReports() never returns it.  We keep the
+      // entry in local state until a full page reload.
+      setDefects((prev) => [
+        {
+          defectId: `local-${Date.now()}`,
+          simulatorId: targetSimId,
+          sessionId: null,
+          reportedBy: user!.name,
+          systemAffected: capturedSystem,
+          severity: status as 'AOG' | 'MEL' | 'Defect',
+          instructorNotes: capturedDescription,
+          status: 'Open',
+          resolutionNotes: null,
+          reportedAt: new Date().toISOString(),
+          resolvedAt: null,
+        },
+        ...prev,
+      ]);
       setTimeout(() => {
         setShowSuccessToast(false);
       }, 5000);
@@ -392,6 +438,12 @@ export default function EngineerDashboard() {
     year: 'numeric'
   });
 
+  const defectHistory = [...defects].sort((a, b) => {
+    const aTime = toLocalDate(a.reportedAt)?.getTime() ?? 0;
+    const bTime = toLocalDate(b.reportedAt)?.getTime() ?? 0;
+    return bTime - aTime;
+  });
+
   const hardwareComponents = [
     { label: 'Motion Platform', value: '99.2%', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
     { label: 'Visual System', value: '120 Hz', statusClass: 'text-green-600', dotClass: 'bg-green-500' },
@@ -514,7 +566,8 @@ export default function EngineerDashboard() {
           )}
         </AnimatePresence>
 
-        <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto lg:overflow-hidden">
+          <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 lg:overflow-hidden min-w-0">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -819,6 +872,114 @@ export default function EngineerDashboard() {
                   {maintPending ? 'Submitting Checklist...' : 'Sign-off Daily Maintenance'}
                 </button>
               </div>
+            </div>
+          </motion.div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="shrink-0 border-t border-gray-200 p-4 sm:p-6 bg-gray-50/30"
+          >
+            <div className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm space-y-4">
+              <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 bg-gray-400 rounded-full shrink-0" />
+                  <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider truncate">
+                    Historical Defect & Resolution Log
+                  </h3>
+                </div>
+                <span className="px-2 py-0.5 bg-gray-100 border border-gray-300 text-gray-600 text-[8px] font-black rounded-full whitespace-nowrap shrink-0">
+                  {defectHistory.length} Records
+                </span>
+              </div>
+
+              {defectHistory.length === 0 ? (
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-[9px] font-bold text-gray-500 uppercase tracking-wider">
+                  No defect history recorded.
+                </div>
+              ) : (
+                <div className="max-h-96 overflow-y-auto border border-gray-100 rounded">
+                  <div className="hidden md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,1.5fr)] gap-3 px-3 py-2 border-b border-gray-100 bg-gray-50/80 sticky top-0 z-10 text-[8px] font-black uppercase tracking-wider text-gray-400">
+                    <span className="truncate">Simulator</span>
+                    <span className="truncate">System & Severity</span>
+                    <span className="truncate">Reported</span>
+                    <span className="truncate">Resolved</span>
+                    <span className="truncate">Downtime</span>
+                    <span className="truncate">Resolution Notes</span>
+                  </div>
+
+                  <div className="divide-y divide-gray-100">
+                    {defectHistory.map((d, idx) => {
+                      const targetSim = simulators.find((s) => s.id === d.simulatorId);
+                      const isResolved = d.status === 'Resolved';
+                      const downtime = formatDowntimeDuration(d.reportedAt, d.resolvedAt);
+                      const notes = d.resolutionNotes?.trim()
+                        ? d.resolutionNotes
+                        : isResolved
+                          ? 'Marked as resolved.'
+                          : '—';
+                      return (
+                        <motion.div
+                          key={d.defectId || idx}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.25, delay: idx * 0.03 }}
+                          className="p-3 flex flex-col gap-2 md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,0.7fr)_minmax(0,1.5fr)] md:gap-3 md:items-center hover:bg-gray-50 transition-colors min-w-0"
+                        >
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">Simulator</span>
+                            <span className="text-[11px] font-black text-gray-900 truncate block">
+                              {targetSim ? targetSim.name : `SIM ${d.simulatorId.substring(0, 8)}`}
+                            </span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">System & Severity</span>
+                            <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                              <span className="text-[10px] font-bold text-gray-800 truncate">{d.systemAffected}</span>
+                              <span className={`px-1.5 py-0.5 border text-[7.5px] font-black rounded uppercase whitespace-nowrap shrink-0 ${defectSeverityBadgeClass(d.severity)}`}>
+                                {d.severity}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">Reported</span>
+                            <span className="text-[10px] font-bold text-gray-800 truncate block">{formatLocalDateTime(d.reportedAt)}</span>
+                            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider truncate block">by {d.reportedBy}</span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">Resolved</span>
+                            {isResolved && d.resolvedAt ? (
+                              <span className="text-[10px] font-bold text-gray-800 truncate block">{formatLocalDateTime(d.resolvedAt)}</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 bg-blue-50 border border-blue-300 text-blue-700 text-[7.5px] font-black rounded uppercase whitespace-nowrap">
+                                <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0" />
+                                Ongoing
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">Downtime</span>
+                            <span className="text-[10px] font-black text-gray-900 whitespace-nowrap">{downtime ?? '—'}</span>
+                          </div>
+
+                          <div className="min-w-0">
+                            <span className="md:hidden block text-[8px] font-black uppercase tracking-wider text-gray-400 mb-0.5">Resolution Notes</span>
+                            <span className="text-[10px] font-bold text-gray-700 truncate block" title={notes}>
+                              {notes}
+                            </span>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         </div>
