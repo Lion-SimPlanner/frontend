@@ -7,7 +7,7 @@ export default defineConfig({
     setupFiles: './vitest.setup.ts',
     globals: true,
     css: true,
-    pool: 'threads',
+    pool: 'forks',
   },
   resolve: {
     alias: {
