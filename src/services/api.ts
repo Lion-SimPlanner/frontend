@@ -502,8 +502,10 @@ export const submitDefectReport = async (
   return response.data;
 };
 
-export const getDefectReports = async (): Promise<DefectReport[]> => {
-  const response = await apiClient.get<any[]>('/api/asset/defects');
+export const getDefectReports = async (includeResolved = false): Promise<DefectReport[]> => {
+  const response = await apiClient.get<any[]>('/api/asset/defects', {
+    params: includeResolved ? { includeResolved: true } : undefined,
+  });
   return response.data.map((d) => ({
     defectId: d.defectId,
     simulatorId: d.simulatorId,
