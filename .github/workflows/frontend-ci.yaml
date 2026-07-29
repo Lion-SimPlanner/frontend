@@ -9,7 +9,7 @@ on:
       - master
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +22,9 @@ jobs:
 
     - name: Install dependencies
       run: npm install
+
+    - name: Run Unit Tests
+      run: npm test
 
     - name: Build Next.js App
       run: npm run build
