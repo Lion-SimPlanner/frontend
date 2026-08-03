@@ -465,100 +465,62 @@ export default function EngineerDashboard() {
   ];
 
   return (
-    <div className="h-screen w-full flex flex-col md:flex-row bg-white text-gray-900 overflow-hidden font-sans">
-      <aside className="w-full md:w-64 lg:w-72 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col justify-between p-4 shrink-0 shadow-[10px_0_15px_-3px_rgba(0,0,0,0.02)] z-10 overflow-y-auto">
-        <div className="space-y-4 md:space-y-6">
-          <div className="flex items-center gap-3">
-            <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-black tracking-widest text-gray-950 truncate">LION SIMPLANNER</span>
-              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider truncate">Engineering</span>
-            </div>
-          </div>
-
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="p-3 bg-red-50 border border-brand-red rounded shadow-sm hover:shadow-md transition-shadow"
-          >
-            <span className="text-[9px] font-black text-brand-red uppercase tracking-wider block">Engineer Portal</span>
-            <span className="text-xs font-bold text-gray-900 mt-1 block truncate">{currentSimulator ? `${currentSimulator.name}` : 'No simulator loaded'}</span>
-          </motion.div>
-
-          <nav className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-3 py-2 text-xs font-black uppercase tracking-wider rounded bg-brand-red text-white transition-all active:scale-95 shadow-sm cursor-pointer">
-              Overview
-            </button>
-          </nav>
-        </div>
-
-        <div className="space-y-4 mt-4 md:mt-0">
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-3 bg-red-50 border border-brand-red rounded text-[10px] space-y-1 shadow-sm"
-          >
-            <div className="font-black text-brand-red uppercase flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-pulse shrink-0" /> Active Alerts
-            </div>
-            <div className="text-gray-900 font-bold truncate">{faultCount} FAULT — action required</div>
-            <div className="text-gray-900 font-bold truncate">{degradedCount} DEGRADED — monitor</div>
-          </motion.div>
-
-          <div className="flex items-center justify-between border-t border-gray-150 pt-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-black text-xs text-gray-700 shrink-0 transition-transform hover:scale-110">
-                {user.name.split(' ').map(n => n[0]).join('')}
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs font-black text-gray-950 truncate uppercase leading-none">{user.name}</div>
-                <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Sim Engineer • Day</div>
-              </div>
-            </div>
-            <button onClick={logout} className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 active:scale-90 ml-1">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+    <div className="h-screen w-full flex flex-col bg-white text-gray-900 overflow-hidden font-sans">
+      <header className="sticky top-0 z-50 w-full bg-white border-b border-gray-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <img src="/lion logo.png" alt="Lion Logo" className="w-8 h-8 object-contain shrink-0" />
+          <div className="flex flex-col min-w-0">
+            <span className="text-[11px] font-black tracking-widest text-gray-950 truncate">LION SIMPLANNER</span>
+            <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider truncate">Engineer Portal | B737-800NG FFS</span>
           </div>
         </div>
-      </aside>
+
+        <div className="hidden sm:flex items-center gap-2 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded shadow-inner shrink-0">
+          <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping shrink-0" />
+          <span className="text-xs font-black text-gray-900 whitespace-nowrap tabular-nums">{currentTime.toLocaleTimeString('en-GB', { hour12: false })}</span>
+          <span className="text-[8px] font-black text-gray-400 uppercase">Local</span>
+          <span className="text-gray-300 shrink-0">|</span>
+          <span className="text-[9px] font-bold text-gray-500 uppercase whitespace-nowrap">Shift {formatLocalTime(primaryEngineer?.shiftStart)} - {formatLocalTime(primaryEngineer?.shiftEnd)}</span>
+        </div>
+
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <AnimatePresence>
+            {activeFault && (
+              <motion.span
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="bg-red-50 text-brand-red border border-brand-red text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none shrink-0 shadow-sm"
+              >
+                {faultCount} Fault Active
+              </motion.span>
+            )}
+          </AnimatePresence>
+          <button
+            onClick={handleCheckout}
+            disabled={checkoutPending}
+            className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-sm cursor-pointer whitespace-nowrap"
+          >
+            {checkoutPending ? 'Checking Out...' : 'Checkout Shift'}
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center font-black text-[11px] text-gray-700 shrink-0 transition-transform hover:scale-110">
+              {user.name.split(' ').map(n => n[0]).join('')}
+            </div>
+            <div className="hidden md:block min-w-0">
+              <div className="text-[9px] font-black text-gray-950 truncate uppercase leading-none">{user.name}</div>
+              <div className="text-[7px] font-bold text-gray-400 uppercase tracking-widest mt-0.5 truncate">Sim Engineer</div>
+            </div>
+          </div>
+          <button onClick={logout} aria-label="Logout" className="text-gray-400 hover:text-brand-red transition-all cursor-pointer shrink-0 active:scale-90 ml-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+          </button>
+        </div>
+      </header>
 
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-white">
-        <header className="min-h-[4rem] border-b border-gray-200 bg-white flex flex-wrap items-center justify-between px-4 sm:px-6 py-2 gap-2 shrink-0 z-30">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <h1 className="text-xs sm:text-sm font-black uppercase text-gray-950 truncate">Maintenance & Shift Overview</h1>
-            <AnimatePresence>
-              {activeFault && (
-                <motion.span
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="bg-red-50 text-brand-red border border-brand-red text-[8px] font-black px-2 py-0.5 rounded uppercase leading-none shrink-0 shadow-sm"
-                >
-                  {faultCount} Fault Active
-                </motion.span>
-              )}
-            </AnimatePresence>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <span className="text-[9px] sm:text-[10px] text-gray-400 font-bold uppercase tracking-wider hidden lg:block truncate max-w-md">
-              {topBarDateLabel} • {formatLocalTime(primaryEngineer?.shiftStart)}-{formatLocalTime(primaryEngineer?.shiftEnd)} Local • {user.name}
-            </span>
-            <button
-              onClick={handleCheckout}
-              disabled={checkoutPending}
-              className="px-2.5 py-1 border border-green-600 text-green-700 text-[9px] font-black uppercase rounded hover:bg-green-50 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none shadow-sm cursor-pointer whitespace-nowrap"
-            >
-              {checkoutPending ? 'Checking Out...' : 'Checkout Shift'}
-            </button>
-            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 px-2 sm:px-2.5 py-1 rounded shadow-inner shrink-0">
-              <span className="w-1.5 h-1.5 bg-brand-red rounded-full animate-ping shrink-0" />
-              <span className="text-[8px] sm:text-[9px] font-black text-gray-900 whitespace-nowrap">{currentTime.toLocaleTimeString('en-GB', { hour12: false })} LOCAL</span>
-            </div>
-          </div>
-        </header>
-
         <AnimatePresence>
           {(checkoutTime || checkoutError) && (
             <motion.div
@@ -575,7 +537,27 @@ export default function EngineerDashboard() {
           )}
         </AnimatePresence>
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto lg:overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 overflow-y-auto lg:overflow-hidden w-full px-4 sm:px-6 py-6">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border border-gray-150 rounded p-3 sm:p-4 bg-white shadow-sm">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2.5 h-2.5 bg-brand-red rounded-full animate-pulse shrink-0" />
+              <h3 className="text-xs font-black uppercase text-gray-900 tracking-wider truncate">
+                Active Alerts Summary
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2 py-0.5 bg-red-100 border border-red-300 text-brand-red text-[8px] font-black rounded-full whitespace-nowrap">
+                {faultCount} FAULT — action required
+              </span>
+              <span className="px-2 py-0.5 bg-orange-100 border border-orange-300 text-orange-800 text-[8px] font-black rounded-full whitespace-nowrap">
+                {degradedCount} DEGRADED — monitor
+              </span>
+              <span className="px-2 py-0.5 bg-green-100 border border-green-300 text-green-700 text-[8px] font-black rounded-full whitespace-nowrap">
+                {simulators.length} SIMULATORS ONLINE
+              </span>
+            </div>
+          </div>
+
           <div className="flex flex-col lg:flex-row lg:flex-1 lg:min-h-0 lg:overflow-hidden min-w-0">
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -889,7 +871,7 @@ export default function EngineerDashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.1 }}
-            className="shrink-0 border-t border-gray-200 p-4 sm:p-6 bg-gray-50/30"
+            className="shrink-0"
           >
             <div className="border border-gray-150 rounded p-4 sm:p-6 bg-white shadow-sm space-y-4">
               <div className="flex flex-wrap items-center justify-between border-b border-gray-100 pb-3 gap-2">
