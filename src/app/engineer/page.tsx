@@ -294,8 +294,17 @@ export default function EngineerDashboard() {
     setIsResolving(true);
     try {
       if (selectedDefectToResolve) {
-        await resolveDefectReport(selectedDefectToResolve.defectId, resolutionDetails.trim() || 'Defect resolved by engineer.');
-        setSelectedDefectToResolve(null);
+        if (selectedDefectToResolve.defectId.startsWith('local-')) {
+          await resolveDefect(
+            selectedDefectToResolve.simulatorId,
+            resolutionDetails.trim() || 'Defect resolved by engineer.'
+          );
+          setDefects((prev) => prev.filter((d) => d.defectId !== selectedDefectToResolve.defectId));
+          setSelectedDefectToResolve(null);
+        } else {
+          await resolveDefectReport(selectedDefectToResolve.defectId, resolutionDetails.trim() || 'Defect resolved by engineer.');
+          setSelectedDefectToResolve(null);
+        }
       } else {
         const targetSimulator = currentSimulator;
         if (!targetSimulator) {

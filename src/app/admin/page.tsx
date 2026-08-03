@@ -28,6 +28,7 @@ import {
 } from '@/services/api';
 import { getHubConnection, startConnection } from '@/services/signalr';
 import TimeDebtQueue from '@/components/admin/TimeDebtQueue';
+import DailyResourceCalendar from '@/components/admin/DailyResourceCalendar';
 import GradeSummaryModal from '@/components/shared/GradeSummaryModal';
 
 const listContainer: Variants = {
@@ -243,6 +244,7 @@ export default function AdminPage() {
   const [rescheduleViolations, setRescheduleViolations] = useState<string[]>([]);
 
   const [calendarStartDate, setCalendarStartDate] = useState<Date>(() => getStartOfLocalWeek(new Date()));
+  const [calendarDate, setCalendarDate] = useState<Date>(() => startOfLocalDay(new Date()));
   const [sessionDateKey, setSessionDateKey] = useState<string>(() => toLocalDateKey(startOfLocalDay(new Date())));
   const [sessionStartHour, setSessionStartHour] = useState<string>('08');
   const [sessionStartMin, setSessionStartMin] = useState<string>('00');
@@ -522,6 +524,39 @@ export default function AdminPage() {
     setSessionEndMin('00');
 
     setSelectedSimId('');
+    setAssignedTrainee(null);
+    setAssignedTraineeRole('Captain');
+    setAssignedInstructor(null);
+  };
+
+  const handleSlotSelect = (simulatorId: string, dayKey: string, hour: number) => {
+    if (localDateFromKeyAndTime(dayKey, hour, 0).getTime() <= Date.now()) return;
+
+    const isOccupied = sessions.some(s => {
+      if (s.status === 'Cancelled') return false;
+      const start = toLocalDate(s.startTime);
+      const end = toLocalDate(s.endTime);
+      if (!start || !end) return false;
+      const endHour = end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours();
+      return s.simulatorId === simulatorId && toLocalDateKey(start) === dayKey && hour >= start.getHours() && hour < endHour;
+    });
+
+    if (isOccupied) return;
+
+    setViewedSession(null);
+    setIsRescheduleMode(false);
+    setRescheduleViolations([]);
+    setSelectedSlot({ dayKey, hour });
+    setSessionDateKey(dayKey);
+    setSelectedSimId(simulatorId);
+    setSessionStartHour(hour.toString().padStart(2, '0'));
+    setSessionStartMin('00');
+    setSessionDuration(4);
+
+    const endHourNum = Math.min(23, hour + 4);
+    setSessionEndHour(endHourNum.toString().padStart(2, '0'));
+    setSessionEndMin('00');
+
     setAssignedTrainee(null);
     setAssignedTraineeRole('Captain');
     setAssignedInstructor(null);
@@ -1411,193 +1446,32 @@ export default function AdminPage() {
           </div>
 
           <div className="flex-1 h-full overflow-y-auto p-6 min-w-0 flex-grow">
-            <div className="border border-gray-100 rounded p-6 bg-white shadow-sm w-full transition-shadow hover:shadow-md">
-              <div className="mb-4 min-w-0">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-black uppercase text-gray-900 truncate">
-                      7-Day Schedule Grid
-                    </h3>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider truncate">
-                      {calendarRangeLabel} • Click empty cell to build • Click session to view crew
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={goToPreviousWindow}
-                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
-                    >
-                      Prev Week
-                    </button>
-                    <button
-                      onClick={goToTodayWindow}
-                      className="px-2 py-1 border border-brand-red text-brand-red text-[9px] font-black uppercase rounded hover:bg-red-50 shrink-0 active:scale-95 transition-all"
-                    >
-                      Today
-                    </button>
-                    <button
-                      onClick={goToNextWindow}
-                      className="px-2 py-1 border border-gray-200 text-gray-700 text-[9px] font-black uppercase rounded hover:bg-gray-50 shrink-0 active:scale-95 transition-all"
-                    >
-                      Next Week
-                    </button>
-                  </div>
-                </div>
-              </div>
+            <DailyResourceCalendar
+              simulators={simulators}
+              sessions={sessions}
+              pilots={pilots}
+              engineers={engineers}
+              selectedDate={calendarDate}
+              selectedSlot={selectedSlot}
+              selectedSimulatorId={selectedSimId}
+              draftDuration={sessionDuration}
+              draftTraineeName={assignedTrainee?.fullName ?? null}
+              onDateChange={(date) => {
+                setCalendarDate(startOfLocalDay(date));
+                setSelectedSlot(null);
+                setViewedSession(null);
+                setIsRescheduleMode(false);
+                setRescheduleViolations([]);
+              }}
+              onSlotSelect={handleSlotSelect}
+              onSessionClick={(s) => {
+                setSelectedSlot(null);
+                setViewedSession(s);
+                setIsRescheduleMode(false);
+                setRescheduleViolations([]);
+              }}
+            />
 
-              <div className="overflow-x-auto max-w-full border border-gray-100 rounded">
-                <div className="min-w-[1200px]">
-                  <div
-                    className="grid bg-gray-50 border-b border-gray-100 text-center font-bold text-[10px] text-gray-500 uppercase py-3"
-                    style={{ gridTemplateColumns: `80px repeat(${visibleDayCount}, minmax(70px, 1fr))` }}
-                  >
-                    <div>Time</div>
-                    {visibleDays.map(dayDate => (
-                      <div key={toLocalDateKey(dayDate)} className="border-l border-gray-100 flex flex-col justify-center min-w-0">
-                        <span className="truncate">{dayDate.toLocaleDateString('en-GB', { weekday: 'short' })}</span>
-                        <span className="text-xs font-black text-gray-900 mt-0.5">{dayDate.getDate()}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="divide-y divide-gray-100 bg-white">
-                    {['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'].map(time => {
-                      const hour = parseInt(time.split(':')[0]);
-                      return (
-                        <div
-                          key={time}
-                          className="grid min-h-[56px] text-xs"
-                          style={{ gridTemplateColumns: `80px repeat(${visibleDayCount}, minmax(70px, 1fr))` }}
-                        >
-                          <div className="flex items-center justify-center font-bold text-gray-400 bg-gray-50 border-r border-gray-100 py-2 shrink-0">
-                            {time}
-                          </div>
-                          {visibleDays.map(dayDate => {
-                            const dayKey = toLocalDateKey(dayDate);
-                            const daySessions = sessions.filter(s => {
-                              if (s.status === 'Cancelled') return false;
-                              const start = toLocalDate(s.startTime);
-                              return !!start && toLocalDateKey(start) === dayKey;
-                            });
-
-                            const startingSessions = daySessions.filter(s => {
-                              const start = toLocalDate(s.startTime);
-                              return !!start && start.getHours() === hour;
-                            });
-
-                            const isSelectedDraft = selectedSlot &&
-                              selectedSlot.dayKey === dayKey &&
-                              hour >= selectedSlot.hour &&
-                              hour < Math.min(24, selectedSlot.hour + Math.ceil(sessionDuration));
-
-                            const startHourSelected = selectedSlot && selectedSlot.dayKey === dayKey && selectedSlot.hour === hour;
-                            const engineerCovered = hasEngineerCoverage(dayKey, hour);
-                            const isPastSlot = localDateFromKeyAndTime(dayKey, hour, 0).getTime() <= Date.now();
-
-                            return (
-                              <div
-                                key={dayKey}
-                                onClick={() => { if (!isPastSlot) handleCellClick(dayKey, hour); }}
-                                className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors duration-200 min-w-0 ${isPastSlot
-                                  ? 'bg-gray-100/60'
-                                  : isSelectedDraft
-                                    ? 'bg-red-50/50'
-                                    : 'bg-white hover:bg-gray-50 cursor-pointer'
-                                  }`}
-                              >
-                                {engineerCovered && (
-                                  <span className="absolute top-1 right-1 text-[7px] font-black uppercase text-blue-700 bg-blue-100 border border-blue-200 px-1 rounded leading-none z-30 shrink-0">
-                                    Eng
-                                  </span>
-                                )}
-                                <AnimatePresence>
-                                  {isSelectedDraft && startHourSelected && (
-                                    <motion.div
-                                      initial={{ opacity: 0, scaleY: 0.8, originY: 0 }}
-                                      animate={{ opacity: 1, scaleY: 1 }}
-                                      exit={{ opacity: 0, scaleY: 0.8 }}
-                                      style={{
-                                        top: `${Math.round((parseInt(sessionStartMin) / 60) * 56) + 2}px`,
-                                        height: `${(sessionDuration * 56) - 4}px`
-                                      }}
-                                      className="absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black rounded z-10 flex flex-col justify-between border bg-brand-red text-white border-brand-red animate-pulse min-w-0 shadow-lg"
-                                    >
-                                      <div className="min-w-0">
-                                        <div className="uppercase font-extrabold tracking-wide">DRAFT</div>
-                                        <div className="truncate opacity-95">
-                                          {assignedTrainee ? assignedTrainee.fullName : 'No Trainee'}
-                                        </div>
-                                      </div>
-                                      <div className="uppercase tracking-widest text-[7px] truncate opacity-90">
-                                        {simulators.find(sim => sim.id === selectedSimId)?.name || 'SIM'}
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-
-                                {startingSessions.map(s => {
-                                  const start = toLocalDate(s.startTime);
-                                  if (!start) return null;
-                                  const duration = getDurationInHours(s.startTime, s.endTime);
-                                  const heightPx = (duration * 56) - 4;
-                                  const topOffsetPx = Math.round((start.getMinutes() / 60) * 56) + 2;
-
-                                  return (
-                                    <motion.div
-                                      layout
-                                      initial={{ opacity: 0, scale: 0.9 }}
-                                      animate={{ opacity: 1, scale: 1 }}
-                                      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                                      key={s.sessionId}
-                                      style={{
-                                        top: `${topOffsetPx}px`,
-                                        height: `${heightPx}px`
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedSlot(null);
-                                        setViewedSession(s);
-                                        setIsRescheduleMode(false);
-                                        setRescheduleViolations([]);
-                                      }}
-                                      className={`absolute left-0.5 right-0.5 p-1 text-[8px] leading-tight font-black text-white rounded z-20 flex flex-col justify-between cursor-pointer border min-w-0 transition-transform active:scale-95 shadow-sm hover:shadow-md hover:z-30 ${viewedSession?.sessionId === s.sessionId
-                                        ? 'bg-brand-red border-red-800 font-black z-30'
-                                        : s.status === 'Scheduled' || s.status === 'Draft'
-                                          ? 'bg-blue-500 hover:bg-blue-600 border-blue-700 font-bold'
-                                          : s.status === 'InProgress'
-                                            ? 'bg-green-600 hover:bg-green-700 border-green-800 font-bold animate-pulse'
-                                            : s.status === 'Completed'
-                                              ? 'bg-teal-600 hover:bg-teal-700 border-teal-800 font-bold'
-                                              : s.status === 'TerminatedEarly'
-                                                ? 'bg-purple-600 hover:bg-purple-700 border-purple-800 font-bold'
-                                                : s.status === 'Cancelled'
-                                                  ? 'bg-gray-300 hover:bg-gray-400 border-gray-400 opacity-70 font-medium'
-                                                  : 'bg-blue-500 hover:bg-blue-600 border-blue-700 font-medium'
-                                        }`}
-                                    >
-                                      <div className="min-w-0">
-                                        <div className="uppercase truncate">{s.sessionType}</div>
-                                        <div className="truncate opacity-95">
-                                          {s.traineeName || s.traineeEmployeeCode || pilots.find(p => p.employeeCode === s.traineeEmployeeCode)?.fullName || 'No Trainee'}
-                                        </div>
-                                      </div>
-                                      <div className="uppercase tracking-widest text-[7px] truncate opacity-90 flex items-center justify-between gap-1 min-w-0">
-                                        <span className="truncate">{simulators.find(sim => sim.id === s.simulatorId)?.name || 'SIM'}</span>
-                                        <span className="shrink-0">{duration}h</span>
-                                      </div>
-                                    </motion.div>
-                                  );
-                                })}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           <AnimatePresence mode="wait">
@@ -1944,16 +1818,12 @@ export default function AdminPage() {
                           <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">
                             Simulator
                           </label>
-                          <select
-                            value={selectedSimId}
-                            onChange={(e) => handleSimulatorChange(e.target.value)}
-                            className="text-xs font-black text-gray-905 border border-gray-200 rounded p-1.5 bg-white focus:outline-none focus:border-brand-red w-full transition-colors"
-                          >
-                            <option value="">-- Select a Simulator --</option>
-                            {simulators.map((s) => (
-                              <option key={s.id} value={s.id}>{s.name} ({s.typeRating}) - {s.status}</option>
-                            ))}
-                          </select>
+                          <div className={`text-xs font-black border rounded p-1.5 w-full truncate ${selectedSimulatorIsAog
+                            ? 'text-brand-red bg-red-50 border-red-300'
+                            : 'text-gray-900 bg-gray-50 border-gray-200'
+                            }`}>
+                            {selectedSim ? `${selectedSim.name} (${selectedSim.typeRating})` : 'Click a simulator column to book'}
+                          </div>
                         </div>
 
                         <div>
