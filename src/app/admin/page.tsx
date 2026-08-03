@@ -495,6 +495,8 @@ export default function AdminPage() {
   }, [assignedTrainee, assignedTraineeRole, assignedInstructor, selectedSimId, selectedSessionType, simulators, selectedSlot, selectedSimTypeRating]);
 
   const handleCellClick = (dayKey: string, hour: number) => {
+    if (localDateFromKeyAndTime(dayKey, hour, 0).getTime() <= Date.now()) return;
+
     const isOccupied = sessions.some(s => {
       if (s.status === 'Cancelled') return false;
       const start = toLocalDate(s.startTime);
@@ -629,6 +631,11 @@ export default function AdminPage() {
 
   const handleSaveReschedule = async () => {
     if (!viewedSession || !editDateKey) return;
+
+    if (localDateFromKeyAndTime(editDateKey, parseInt(editStartHour, 10), parseInt(editStartMin, 10)).getTime() <= Date.now()) {
+      setRescheduleViolations(['Cannot reschedule a session into the past. Start time must be in the future.']);
+      return;
+    }
 
     const startTime = localDateFromKeyAndTime(editDateKey, parseInt(editStartHour, 10), parseInt(editStartMin, 10)).toISOString();
     const endTime = localDateFromKeyAndTime(editDateKey, parseInt(editEndHour, 10), parseInt(editEndMin, 10)).toISOString();
@@ -1485,14 +1492,17 @@ export default function AdminPage() {
 
                             const startHourSelected = selectedSlot && selectedSlot.dayKey === dayKey && selectedSlot.hour === hour;
                             const engineerCovered = hasEngineerCoverage(dayKey, hour);
+                            const isPastSlot = localDateFromKeyAndTime(dayKey, hour, 0).getTime() <= Date.now();
 
                             return (
                               <div
                                 key={dayKey}
-                                onClick={() => handleCellClick(dayKey, hour)}
-                                className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors duration-200 min-w-0 ${isSelectedDraft
-                                  ? 'bg-red-50/50'
-                                  : 'bg-white hover:bg-gray-50 cursor-pointer'
+                                onClick={() => { if (!isPastSlot) handleCellClick(dayKey, hour); }}
+                                className={`border-r border-gray-100 p-1 relative min-h-[56px] transition-colors duration-200 min-w-0 ${isPastSlot
+                                  ? 'bg-gray-100/60'
+                                  : isSelectedDraft
+                                    ? 'bg-red-50/50'
+                                    : 'bg-white hover:bg-gray-50 cursor-pointer'
                                   }`}
                               >
                                 {engineerCovered && (

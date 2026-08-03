@@ -206,10 +206,7 @@ describe('AuthProvider', () => {
 
       await waitFor(() => expect(result.current.loading).toBe(false));
 
-      let user: Awaited<ReturnType<typeof result.current.login>>;
-      await act(async () => {
-        user = await result.current.login('x@y.com', 'wrong');
-      });
+      const user = await act(async () => result.current.login('x@y.com', 'wrong'));
 
       expect(user).toBeNull();
       expect(result.current.user).toBeNull();
