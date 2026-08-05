@@ -37,7 +37,7 @@ export default function LandingPage() {
 
         {/* NAVBAR */}
         <div className="relative z-20 flex justify-center pt-6 px-6">
-          <nav className="flex w-full max-w-5xl items-center justify-between rounded-full bg-white px-6 py-3 shadow-lg">
+          <nav className="relative flex w-full max-w-5xl items-center justify-between rounded-full bg-white px-6 py-3 shadow-lg">
             <div className="flex items-center gap-2">
               <img src="/lion logo.png" alt="Lion SimPlanner" className="h-8 w-8 object-contain" />
               <span className="text-sm font-black uppercase tracking-widest text-gray-950">
@@ -45,7 +45,7 @@ export default function LandingPage() {
               </span>
             </div>
 
-            <div className="hidden md:flex items-center gap-8">
+            <div className="hidden md:flex absolute left-1/2 -translate-x-1/2 items-center gap-8">
               <a
                 href="#home"
                 className="text-xs font-black uppercase tracking-widest text-gray-700 transition-opacity duration-300 hover:opacity-60"

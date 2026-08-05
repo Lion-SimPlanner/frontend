@@ -1847,19 +1847,20 @@ export default function AdminPage() {
                             <option value="MCC">Multi-Crew Cooperation (MCC)</option>
                           </select>
                         </div>
+                      </div>
 
-                        <AnimatePresence>
-                          {selectedSimulatorIsAog && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider overflow-hidden"
-                            >
-                              Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                      <AnimatePresence>
+                        {selectedSimulatorIsAog && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="border border-orange-300 bg-orange-50 rounded p-2 text-[10px] text-orange-700 font-black uppercase tracking-wider overflow-hidden"
+                          >
+                            Warning: Simulator is currently AOG. Maintenance resolution required before dispatch.
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
 
                         <div className="space-y-3 pt-1 min-w-0">
                           <div className="min-w-0">
@@ -1874,38 +1875,13 @@ export default function AdminPage() {
                               </div>
                             ) : (
                               <div>
-                                <div className="mb-2">
-                                  <label className="block text-[8px] font-black text-gray-400 uppercase tracking-wider mb-1">Trainee Role</label>
-                                  <div className="flex gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => setAssignedTraineeRole('Captain')}
-                                      className={`flex-1 py-1 text-[9px] font-black uppercase rounded border transition-colors cursor-pointer ${assignedTraineeRole === 'Captain'
-                                        ? 'bg-brand-red text-white border-brand-red'
-                                        : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
-                                        }`}
-                                    >
-                                      Captain
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setAssignedTraineeRole('First Officer')}
-                                      className={`flex-1 py-1 text-[9px] font-black uppercase rounded border transition-colors cursor-pointer ${assignedTraineeRole === 'First Officer'
-                                        ? 'bg-brand-red text-white border-brand-red'
-                                        : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
-                                        }`}
-                                    >
-                                      First Officer
-                                    </button>
-                                  </div>
-                                </div>
                                 <AnimatePresence mode="popLayout">
                                   {assignedTrainee ? (
                                     <motion.div
                                       initial={{ opacity: 0, scale: 0.9 }}
                                       animate={{ opacity: 1, scale: 1 }}
                                       exit={{ opacity: 0, scale: 0.9 }}
-                                      className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 shadow-sm"
+                                      className="flex items-center justify-between p-1.5 border border-gray-200 rounded bg-white text-xs gap-2 min-w-0 w-full shadow-sm"
                                     >
                                       <div className="min-w-0 flex-1">
                                         <span className="font-black text-gray-900 truncate block">{assignedTrainee.fullName}</span>
@@ -1916,7 +1892,7 @@ export default function AdminPage() {
                                   ) : (
                                     <motion.div
                                       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                                      className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100"
+                                      className="border border-dashed border-gray-300 rounded p-2 text-center text-[9px] font-bold text-gray-400 bg-gray-50 uppercase tracking-wider truncate transition-colors hover:bg-gray-100 w-full"
                                     >
                                       Select Trainee Card ({eligiblePilots.length} Eligible)
                                     </motion.div>
@@ -1959,7 +1935,7 @@ export default function AdminPage() {
                               </AnimatePresence>
                             )}
                           </div>
-                        </div>                </div>
+                        </div>
                     </div>
 
                     <AnimatePresence>
