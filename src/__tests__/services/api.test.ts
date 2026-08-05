@@ -16,7 +16,7 @@ vi.mock('axios', () => ({
   },
 }));
 
-import { getSessions, getPilotsPriorityQueue } from '@/services/api';
+import { getSessions, getPilotsPriorityQueue, calculateTimeDebts, SimulatorSession } from '@/services/api';
 
 describe('api service', () => {
   beforeEach(() => {
@@ -158,6 +158,128 @@ describe('api service', () => {
       mockGet.mockRejectedValue(new Error('Server error'));
 
       await expect(getPilotsPriorityQueue()).rejects.toThrow('Server error');
+    });
+  });
+
+  describe('calculateTimeDebts', () => {
+    const base = (overrides: Partial<SimulatorSession>): SimulatorSession => ({
+      sessionId: 's-' + Math.random(),
+      simulatorId: 'sim-1',
+      sessionType: 'Recurrent',
+      status: 'Scheduled',
+      startTime: '2026-08-01T08:00:00.000Z',
+      endTime: '2026-08-01T10:00:00.000Z',
+      syllabusId: 'B737_RecurrentTraining',
+      traineeEmployeeCode: 'PLT001',
+      isGraded: false,
+      ...overrides,
+    });
+
+    it('returns empty when no sessions are terminated early', () => {
+      const sessions = [base({ status: 'Completed' })];
+      const result = calculateTimeDebts(sessions);
+      expect(result).toEqual([]);
+    });
+
+    it('counts the shortfall of a terminated session as debt', () => {
+      const terminated = base({
+        status: 'TerminatedEarly',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:28:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const result = calculateTimeDebts([terminated]);
+      expect(result).toHaveLength(1);
+      expect(result[0].traineeEmployeeCode).toBe('PLT001');
+      expect(result[0].totalDebtMinutes).toBe(88);
+      expect(result[0].terminatedSessionCount).toBe(1);
+    });
+
+    it('clears a trainee from the queue when a completed session covers the debt', () => {
+      const terminated = base({
+        status: 'TerminatedEarly',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:28:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const completed = base({
+        status: 'Completed',
+        startTime: '2026-08-02T08:00:00.000Z',
+        endTime: '2026-08-02T12:00:00.000Z',
+        isGraded: true,
+      });
+      const result = calculateTimeDebts([terminated, completed]);
+      expect(result).toHaveLength(0);
+    });
+
+    it('keeps the remaining debt when the completed session is shorter than the shortfall', () => {
+      const terminated = base({
+        status: 'TerminatedEarly',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:28:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const completed = base({
+        status: 'Completed',
+        startTime: '2026-08-02T08:00:00.000Z',
+        endTime: '2026-08-02T09:20:00.000Z',
+        isGraded: true,
+      });
+      const result = calculateTimeDebts([terminated, completed]);
+      expect(result).toHaveLength(1);
+      expect(result[0].totalDebtMinutes).toBe(8);
+    });
+
+    it('ignores completed sessions that started before the termination', () => {
+      const terminated = base({
+        status: 'TerminatedEarly',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:28:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const earlierCompleted = base({
+        status: 'Completed',
+        startTime: '2026-07-30T08:00:00.000Z',
+        endTime: '2026-07-30T12:00:00.000Z',
+        isGraded: true,
+      });
+      const result = calculateTimeDebts([terminated, earlierCompleted]);
+      expect(result).toHaveLength(1);
+      expect(result[0].totalDebtMinutes).toBe(88);
+    });
+
+    it('does not affect other trainees when one repays their debt', () => {
+      const traineeA = base({
+        status: 'TerminatedEarly',
+        traineeEmployeeCode: 'PLT001',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:00:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const traineeB = base({
+        status: 'TerminatedEarly',
+        traineeEmployeeCode: 'PLT002',
+        startTime: '2026-08-01T08:00:00.000Z',
+        endTime: '2026-08-01T09:00:00.000Z',
+        originalEndTime: '2026-08-01T10:00:00.000Z',
+        terminationReason: 'Simulator AOG',
+      });
+      const makeupForA = base({
+        status: 'Completed',
+        traineeEmployeeCode: 'PLT001',
+        startTime: '2026-08-02T08:00:00.000Z',
+        endTime: '2026-08-02T12:00:00.000Z',
+        isGraded: true,
+      });
+      const result = calculateTimeDebts([traineeA, traineeB, makeupForA]);
+      expect(result).toHaveLength(1);
+      expect(result[0].traineeEmployeeCode).toBe('PLT002');
+      expect(result[0].totalDebtMinutes).toBe(60);
     });
   });
 });
