@@ -350,6 +350,7 @@ export default function DailyResourceCalendar({
                       selectedSlot?.dayKey === dayKey &&
                       selectedSlot.hour === h;
                     const occupied = columnSessions.some((s) => {
+                      if (s.status === 'Cancelled') return false;
                       const start = new Date(s.startTime);
                       const end = new Date(s.endTime);
                       if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
