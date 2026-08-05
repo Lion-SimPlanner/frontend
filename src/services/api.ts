@@ -196,9 +196,34 @@ export function calculateTimeDebts(
     }
   }
 
-  return Array.from(debtMap.values()).sort(
-    (a, b) => b.totalDebtMinutes - a.totalDebtMinutes
-  );
+  for (const [code, record] of debtMap) {
+    const terminated = sessions.filter(
+      (s) =>
+        (s.traineeEmployeeCode || s.captainId || 'UNKNOWN') === code &&
+        s.status === 'TerminatedEarly'
+    );
+    const earliestTerminationStart = Math.min(
+      ...terminated.map((s) => new Date(s.startTime).getTime())
+    );
+
+    let paidMinutes = 0;
+    for (const s of sessions) {
+      if ((s.traineeEmployeeCode || s.captainId || 'UNKNOWN') !== code) continue;
+      if (s.status !== 'Completed') continue;
+      const start = new Date(s.startTime).getTime();
+      const end = new Date(s.endTime).getTime();
+      if (isNaN(start) || isNaN(end) || end <= start) continue;
+      if (start >= earliestTerminationStart) {
+        paidMinutes += Math.round((end - start) / (1000 * 60));
+      }
+    }
+
+    record.totalDebtMinutes = Math.max(0, record.totalDebtMinutes - paidMinutes);
+  }
+
+  return Array.from(debtMap.values())
+    .filter((d) => d.totalDebtMinutes > 0)
+    .sort((a, b) => b.totalDebtMinutes - a.totalDebtMinutes);
 }
 
 export function formatDebtDuration(totalMinutes: number): string {
